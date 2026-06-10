@@ -1,0 +1,15 @@
+# Enforce standard Unix line endings (LF) for all text files across Mac and Windows
+* text=auto eol=lf
+
+# Force specific executable scripts to strictly use LF
+*.sh text eol=lf
+*.py text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.hpp text eol=lf
+
+# Denotate binary files that should not be touched by line-ending conversions
+*.png binary
+*.jpg binary
+*.dae binary
+*.stl binary
