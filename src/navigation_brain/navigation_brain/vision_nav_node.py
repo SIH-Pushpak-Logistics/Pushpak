@@ -4,6 +4,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import TwistStamped
 from cv_bridge import CvBridge, CvBridgeError
+import cv2
 
 class VisionNavigationNode(Node):
     def __init__(self):
@@ -74,9 +75,32 @@ class VisionNavigationNode(Node):
 
     def detect_obstacles(self, cv_frame):
         """
-        Future obsctacle detection logic.
+        Basic obstacle detection pipeline.
         """
-        return {}
+
+        gray = cv2.cvtColor(
+            cv_frame,
+            cv2.COLOR_BGR2GRAY
+        )
+        
+        edges = cv2.Canny(
+            gray,
+            50,150
+        )
+        self.get_logger().info(
+            f'Processed frame size: {gray.shape}'
+        )
+
+        edge_pixels = cv2.countNonZero(edges)
+
+        self.get_logger().info(
+            f'Edge pixels detected: {edge_pixels}'
+        )
+
+        return {
+            "gray_frame": gray,
+            "edge_frame": edges
+        }
 
     def compute_optical_flow(self, cv_frame):
         """
