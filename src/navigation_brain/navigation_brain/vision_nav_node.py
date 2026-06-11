@@ -87,13 +87,13 @@ class VisionNavigationNode(Node):
             gray,
             50,150
         )
-        self.get_logger().info(
+        self.get_logger().debug(
             f'Processed frame size: {gray.shape}'
         )
 
         edge_pixels = cv2.countNonZero(edges)
 
-        self.get_logger().info(
+        self.get_logger().debug(
             f'Edge pixels detected: {edge_pixels}'
         )
 
