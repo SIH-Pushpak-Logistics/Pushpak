@@ -5,6 +5,8 @@ from sensor_msgs.msg import Image
 from geometry_msgs.msg import TwistStamped
 from cv_bridge import CvBridge, CvBridgeError
 import cv2
+import redis
+import time
 
 class VisionNavigationNode(Node):
     def __init__(self):
@@ -13,6 +15,25 @@ class VisionNavigationNode(Node):
 
         # Initialize the bridge between ROS 2 images and OpenCV matrices
         self.bridge = CvBridge()
+
+        try:
+            self.redis_client = redis.Redis(
+                host='localhost',
+                port=6379,
+                decode_responses=True
+            )
+
+            self.redis_client.ping()
+
+            self.telemetry_stream = 'telemetry:drone_00:velocity'
+
+            self.get_logger().info(
+                'redis telemetry connection established.'
+            )
+        except Exception as e:
+            self.get_logger().error(
+                f'Redis connection failed: {e}'
+            )
 
         # DATA CONTRACT INPUT: Subscriber to the simulated down-facing camera
         self.camera_subscription = self.create_subscription(
@@ -70,6 +91,22 @@ class VisionNavigationNode(Node):
             obstacles,
             motion
         )
+
+        try:
+            self.redis_client.xadd(
+                self.telemetry_stream,
+                {
+                    'timestamp': str(time.time()),
+                    'linear_x': str(cmd_msg.twist.linear.x),
+                    'linear_y': str(cmd_msg.twist.linear.y),
+                    'linear_z': str(cmd_msg.twist.linear.z),
+                    'angular_z': str(cmd_msg.twist.angular.z)
+                }
+            )
+        except Exception as e:
+            self.get_logger().error(
+                f'redis telemetry publish failed: {e}'
+            )
 
         return cmd_msg
 
