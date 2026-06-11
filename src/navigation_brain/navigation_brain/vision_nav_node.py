@@ -61,9 +61,45 @@ class VisionNavigationNode(Node):
         cmd_msg.twist.linear.z = 0.0
         cmd_msg.twist.angular.z = 0.0
 
-        # TODO: Implement optical flow displacement vectors here
-        
+        obstacles = self.detect_obstacles(cv_frame)
+
+        motion = self.compute_optical_flow(cv_frame)
+
+        cmd_msg = self.calculate_safe_velocity(
+            obstacles,
+            motion
+        )
+
         return cmd_msg
+
+    def detect_obstacles(self, cv_frame):
+        """
+        Future obsctacle detection logic.
+        """
+        return {}
+
+    def compute_optical_flow(self, cv_frame):
+        """
+        Future optical flow logic.
+        """
+        return {}
+
+    def calculate_safe_velocity(self, obstacles, motion):
+         """
+         Future navigation decision logic.
+         """
+         cmd_msg = TwistStamped()
+
+         cmd_msg.header.stamp = self.get_clock().now().to_msg()
+         cmd_msg.header.frame_id = 'base_link'
+
+         cmd_msg.twist.linear.x = 0.0
+         cmd_msg.twist.linear.y = 0.0
+         cmd_msg.twist.linear.z = 0.0
+         cmd_msg.twist.angular.z = 0.0
+
+         return cmd_msg
+    
 
 def main(args=None):
     rclpy.init(args=args)
