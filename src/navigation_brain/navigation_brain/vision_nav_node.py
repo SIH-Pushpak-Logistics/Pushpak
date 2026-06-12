@@ -4,6 +4,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import TwistStamped
 from cv_bridge import CvBridge, CvBridgeError
+import cv2
 
 class VisionNavigationNode(Node):
     def __init__(self):
