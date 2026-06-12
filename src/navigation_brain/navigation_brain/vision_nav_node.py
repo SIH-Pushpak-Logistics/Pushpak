@@ -75,32 +75,9 @@ class VisionNavigationNode(Node):
 
     def detect_obstacles(self, cv_frame):
         """
-        Basic obstacle detection pipeline.
+        Future obsctacle detection logic.
         """
-
-        gray = cv2.cvtColor(
-            cv_frame,
-            cv2.COLOR_BGR2GRAY
-        )
-        
-        edges = cv2.Canny(
-            gray,
-            50,150
-        )
-        self.get_logger().debug(
-            f'Processed frame size: {gray.shape}'
-        )
-
-        edge_pixels = cv2.countNonZero(edges)
-
-        self.get_logger().debug(
-            f'Edge pixels detected: {edge_pixels}'
-        )
-
-        return {
-            "gray_frame": gray,
-            "edge_frame": edges
-        }
+        return {}
 
     def compute_optical_flow(self, cv_frame):
         """
