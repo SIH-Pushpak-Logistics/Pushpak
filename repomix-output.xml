@@ -40,10 +40,20 @@ The content is organized as follows:
 </file_summary>
 
 <directory_structure>
+firmware/
+  ardupilot_config/
+    base_iris.param
+    drone_01.param
+    drone_02.param
 src/
+  drone_bringup/
+    launch/
+      swarm_bringup.launch.py
   navigation_brain/
     navigation_brain/
       __init__.py
+      landing_state_node.py
+      state_machine_node.py
       vision_nav_node.py
     package.xml
     setup.py
@@ -56,8 +66,281 @@ README.md
 <files>
 This section contains the contents of the repository's files.
 
+<file path="firmware/ardupilot_config/base_iris.param">
+# base_iris.param
+# -------------------------------------------------------------
+# FRAME CONFIGURATION
+# -------------------------------------------------------------
+FRAME_CLASS     1      # 1 = Quadcopter
+FRAME_TYPE      1      # 1 = X configuration
+
+# -------------------------------------------------------------
+# BATTERY SIMULATION (CRITICAL FOR ML TRAINING)
+# -------------------------------------------------------------
+BATT_MONITOR    4      # 4 = Analog Voltage and Current
+BATT_CAPACITY   5000   # Battery capacity in mAh (e.g., 5000mAh)
+BATT_VOLT_MAX   16.8   # Max voltage (e.g., 4S LiPo at full charge)
+BATT_VOLT_MIN   13.2   # Min safe voltage before critical failsafe
+BATT_FS_LOW_ACT 1      # 1 = RTL (Return to Launch) on low battery
+BATT_FS_CRT_ACT 2      # 2 = Land on critical battery
+
+# SITL SPECIFIC BATTERY SIMULATION
+SIM_BATT_VOLTAGE 16.8  # Starting voltage for the simulator
+SIM_BATT_CAP_AH  5.0   # Starting capacity in Amp-Hours
+</file>
+
+<file path="firmware/ardupilot_config/drone_01.param">
+# drone_01.param
+# System ID (CRITICAL: MUST BE UNIQUE)
+SYSID_THISMAV   1
+
+# MAVLink configuration for local routing
+# Defines where this specific drone outputs its telemetry to MAVROS
+SERIAL0_BAUD    115
+SERIAL0_PROTOCOL 2
+</file>
+
+<file path="firmware/ardupilot_config/drone_02.param">
+# drone_02.param
+# System ID (CRITICAL: MUST BE UNIQUE)
+SYSID_THISMAV   2
+
+# MAVLink configuration for local routing
+SERIAL0_BAUD    115
+SERIAL0_PROTOCOL 2
+</file>
+
+<file path="src/drone_bringup/launch/swarm_bringup.launch.py">
+import os
+from launch import LaunchDescription
+from launch_ros.actions import Node
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
+
+def generate_launch_description():
+    # 1. Define the system-wide arguments
+    drone_id_arg = DeclareLaunchArgument(
+        'drone_id',
+        default_value='drone_00',
+        description='Unique identifier for the swarm drone'
+    )
+    
+    drone_id = LaunchConfiguration('drone_id')
+
+    # 2. Architect the Node Bringup Sequence
+    # This enforces that all nodes share the exact same drone_id namespace
+    
+    vision_nav_node = Node(
+        package='navigation_brain',
+        executable='vision_nav_node',
+        name='vision_nav',
+        parameters=[{'drone_id': drone_id}],
+        output='screen'
+    )
+    
+    landing_state_node = Node(
+        package='navigation_brain',
+        executable='landing_state_node', # Shivam's future executable
+        name='landing_state',
+        parameters=[{'drone_id': drone_id}],
+        output='screen'
+    )
+
+    state_machine_node = Node(
+        package='navigation_brain',
+        executable='state_machine_node',
+        name='master_state_machine',
+        parameters=[{'drone_id': drone_id}],
+        output='screen'
+    )
+
+    # 3. Execute the Swarm
+    return LaunchDescription([
+        drone_id_arg,
+        vision_nav_node,
+        landing_state_node,
+        state_machine_node
+    ])
+</file>
+
+<file path="src/navigation_brain/navigation_brain/landing_state_node.py">
+#!/usr/bin/env python3
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import Float32
+import redis
+import queue
+import threading
+import time
+import json
+
+class AltitudeNavigationNode(Node):
+    def __init__(self):
+        super().__init__('altitude_nav_node')
+        self.get_logger().info('Initializing Altitude Navigation...')
+
+        # Hardcoded for this node instance, should ideally be a ROS parameter
+        self.drone_id = "drone_01" 
+        self.target_altitude = 5.0  # Target Z in meters
+
+        # Input Layer: Strictly Perception/Sensor Data
+        self.altitude_subscription = self.create_subscription(
+            Float32, 
+            '/drone/altitude', 
+            self.altitude_callback, 
+            10
+        )
+
+        # ARCHITECTURE ENFORCEMENT: MAVROS publisher strictly forbidden. 
+        # This node calculates intent; it does not authorize motor actuation.
+
+        # --- YOUR TASK BEGINS HERE ---
+        # 1. Establish a Redis connection (host='localhost', port=6379).
+        # 2. Create a bounded queue: queue.Queue(maxsize=5) to prevent memory bloating on block.
+        # 3. Start a background threading.Thread (daemon=True) that continuously drains 
+        #    the queue and pushes to Redis.
+        pass 
+
+    def altitude_callback(self, msg):
+        current_z = msg.data
+        
+        # --- YOUR TASK ---
+        # 1. Calculate the required $V_z$ (linear_z) to reach self.target_altitude.
+        #    Implement your P/PI/PID logic here. 
+        # 2. Construct the exact JSON payload dictated by the Data Contract:
+        #    {
+        #      "timestamp": <current_unix_epoch_float>,
+        #      "drone_id": self.drone_id,
+        #      "linear_x": 0.0,
+        #      "linear_y": 0.0,
+        #      "linear_z": <calculated_v_z>,
+        #      "angular_z": 0.0
+        #    }
+        # 3. Push this dictionary into your queue.
+        # 
+        # CRITICAL: DO NOT block this callback. No time.sleep(), no synchronous Redis calls.
+        pass
+
+    def _redis_publisher_worker(self):
+        # --- YOUR TASK ---
+        # 1. Loop infinitely, blocking on queue.get().
+        # 2. Publish the popped payload to the Redis stream: 
+        #    Stream Key -> telemetry:<drone_id>:altitude_cmd
+        # 3. Use XADD. Enforce maximum stream length (MAXLEN) to prevent memory leaks.
+        pass
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = AltitudeNavigationNode()
+    
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        node.get_logger().info("Shutting down Altitude Navigation...")
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+</file>
+
 <file path="src/navigation_brain/navigation_brain/__init__.py">
 
+</file>
+
+<file path="src/navigation_brain/navigation_brain/state_machine_node.py">
+#!/usr/bin/env python3
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import TwistStamped
+import redis
+import time
+
+class StateMachineNode(Node):
+    def __init__(self):
+        super().__init__('state_machine_node')
+        
+        self.declare_parameter('drone_id', 'drone_00')
+        self.drone_id = self.get_parameter('drone_id').get_parameter_value().string_value
+        
+        self.get_logger().info(f'Initializing Master State Machine for {self.drone_id}...')
+
+        # The ONLY node allowed to talk to MAVROS
+        self.velocity_publisher = self.create_publisher(
+            TwistStamped,
+            '/mavros/setpoint_velocity/cmd_vel',
+            10
+        )
+
+        try:
+            self.redis_client = redis.Redis(host='localhost', port=6379, decode_responses=True)
+            self.redis_client.ping()
+            self.telemetry_stream = f'telemetry:{self.drone_id}:velocity'
+            self.override_stream = f'emergency_override:{self.drone_id}'
+        except redis.ConnectionError as e:
+            self.get_logger().error(f'FATAL: Redis connection failed: {e}')
+            raise SystemExit
+
+        self.control_timer = self.create_timer(0.05, self.control_loop) # 20Hz
+        self.max_data_age = 0.5 
+
+    def control_loop(self):
+        cmd_msg = TwistStamped()
+        cmd_msg.header.stamp = self.get_clock().now().to_msg()
+        cmd_msg.header.frame_id = f'{self.drone_id}_base_link'
+        
+        target_vx, target_vy, target_vz, target_wz = 0.0, 0.0, 0.0, 0.0
+        executed_source = "FAILSAFE_HOVER"
+        
+        # Priority 1: Emergency Override
+        override_data = self.redis_client.xrevrange(self.override_stream, max='+', min='-', count=1)
+        vision_data = self.redis_client.xrevrange(self.telemetry_stream, max='+', min='-', count=1)
+
+        if override_data and not self.is_stale(override_data[0][1].get('timestamp', 0)):
+            payload = override_data[0][1]
+            target_vx, target_vy, target_vz, target_wz = self.extract_vectors(payload)
+            executed_source = "GLOBAL_OVERRIDE"
+                
+        # Priority 2: Local Vision
+        elif vision_data and not self.is_stale(vision_data[0][1].get('timestamp', 0)):
+            payload = vision_data[0][1]
+            target_vx, target_vy, target_vz, target_wz = self.extract_vectors(payload)
+            executed_source = "LOCAL_VISION"
+
+        cmd_msg.twist.linear.x = target_vx
+        cmd_msg.twist.linear.y = target_vy
+        cmd_msg.twist.linear.z = target_vz
+        cmd_msg.twist.angular.z = target_wz
+
+        self.velocity_publisher.publish(cmd_msg)
+
+    def extract_vectors(self, payload):
+        return (
+            float(payload.get('linear_x', 0.0)),
+            float(payload.get('linear_y', 0.0)),
+            float(payload.get('linear_z', 0.0)),
+            float(payload.get('angular_z', 0.0))
+        )
+
+    def is_stale(self, payload_timestamp_str):
+        try:
+            if (time.time() - float(payload_timestamp_str)) > self.max_data_age:
+                self.get_logger().warn('Stale data. Defaulting to hover.')
+                return True
+            return False
+        except ValueError:
+            return True
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = StateMachineNode()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
 </file>
 
 <file path="src/navigation_brain/navigation_brain/vision_nav_node.py">
@@ -66,78 +349,44 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import TwistStamped
-from cv_bridge import CvBridge, CvBridgeError
+from cv_bridge import CvBridge
+import cv2
+import redis
+import queue
+import threading
 
 class VisionNavigationNode(Node):
     def __init__(self):
         super().__init__('vision_nav_node')
-        self.get_logger().info('Initializing Vision Navigation Architecture Node...')
+        self.get_logger().info('Initializing Vision Navigation...')
 
-        # Initialize the bridge between ROS 2 images and OpenCV matrices
         self.bridge = CvBridge()
+        self.camera_subscription = self.create_subscription(Image, '/camera/image_raw', self.image_callback, 10)
 
-        # DATA CONTRACT INPUT: Subscriber to the simulated down-facing camera
-        self.camera_subscription = self.create_subscription(
-            Image,
-            '/camera/image_raw',
-            self.image_callback,
-            10
-        )
+        # ARCHITECTURE ENFORCEMENT: MAVROS publisher removed. 
+        # Perception has no authority over motors.
 
-        # DATA CONTRACT OUTPUT: Publisher to the MAVROS local velocity setpoint
-        self.velocity_publisher = self.create_publisher(
-            TwistStamped,
-            '/mavros/setpoint_velocity/cmd_vel',
-            10
-        )
+        # --- RAUNAK: YOUR TASK BEGINS HERE ---
+        # 1. Establish a Redis connection to host='localhost', port=6379
+        # 2. Create a bounded queue.Queue(maxsize=5)
+        # 3. Start a background threading.Thread that drains the queue and publishes to Redis
+        pass 
 
     def image_callback(self, msg):
-        try:
-            # Convert raw ROS image message to OpenCV BGR matrix
-            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-        except CvBridgeError as e:
-            self.get_logger().error(f'CvBridge Translation Failure: {str(e)}')
-            return
-
-        # Execute algorithmic processing
-        velocity_vector = self.process_vision_pipeline(cv_image)
-
-        # Enforce publication contract
-        self.velocity_publisher.publish(velocity_vector)
-
-    def process_vision_pipeline(self, cv_frame):
-        """
-        RAUNAK: This is the exact scope of your task. 
-        Your OpenCV algorithms, optical flow calculation, or tracking models 
-        must execute inside this function. 
+        cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
         
-        Input: cv_frame (Contiguous numpy array from the camera)
-        Output: Must return a geometry_msgs.msg.TwistStamped message
-        """
-        cmd_msg = TwistStamped()
-        cmd_msg.header.stamp = self.get_clock().now().to_msg()
-        cmd_msg.header.frame_id = 'base_link'
-
-        # DEFAULT SAFETY STATE: Zero velocity override
-        cmd_msg.twist.linear.x = 0.0
-        cmd_msg.twist.linear.y = 0.0
-        cmd_msg.twist.linear.z = 0.0
-        cmd_msg.twist.angular.z = 0.0
-
-        # TODO: Implement optical flow displacement vectors here
-        
-        return cmd_msg
+        # --- RAUNAK: YOUR TASK ---
+        # 1. Calculate X/Y drift using optical flow here.
+        # 2. Push the resulting vector dict into your queue.
+        # DO NOT use time.sleep() or blocking calls here.
+        pass
 
 def main(args=None):
     rclpy.init(args=args)
     node = VisionNavigationNode()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        node.get_logger().info('Shutting down navigation node cleanly via interrupt.')
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
@@ -158,6 +407,8 @@ if __name__ == '__main__':
   <depend>geometry_msgs</depend>
   <depend>cv_bridge</depend>
 
+  <exec_depend>python3-redis</exec_depend>
+
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>
@@ -170,7 +421,35 @@ if __name__ == '__main__':
 </file>
 
 <file path="src/navigation_brain/setup.py">
+from setuptools import find_packages, setup
 
+package_name = 'navigation_brain'
+
+setup(
+    name=package_name,
+    version='0.0.1',
+    packages=find_packages(exclude=['test']),
+    data_files=[
+        ('share/ament_index/resource_index/packages',
+            ['resource/' + package_name]),
+        ('share/' + package_name, ['package.xml']),
+    ],
+    install_requires=['setuptools'],
+    zip_safe=True,
+    maintainer='Architect',
+    maintainer_email='manager@college.ac.in',
+    description='Autonomous vision-based navigation node for SIH drone pipeline',
+    license='Apache-2.0',
+    tests_require=['pytest'],
+    entry_points={
+        'console_scripts': [
+            'vision_nav_node = navigation_brain.vision_nav_node:main',
+            'state_machine_node = navigation_brain.state_machine_node:main',
+            'landing_state_node = navigation_brain.landing_state_node:main'
+
+        ],
+    },
+)
 </file>
 
 <file path=".gitattributes">
@@ -192,11 +471,75 @@ if __name__ == '__main__':
 </file>
 
 <file path=".gitignore">
+# =========================
+# ROS 2 Workspace Artifacts
+# =========================
+build/
+install/
+log/
+core.*
 
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.env
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# =========================
+# OS Generated Files
+# =========================
+# Your Mac
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Their Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# =========================
+# IDEs and Editors
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 </file>
 
 <file path=".repomixignore">
+# Ignore ROS 2 build artifacts and logs
+build/
+install/
+log/
 
+# Ignore heavy 3D mesh files and textures (AI cannot read these)
+*.world
+*.dae
+*.stl
+*.png
+*.jpg
+*.jpeg
+*.mtl
+*.obj
+
+# Ignore standard Python cache
+__pycache__/
+*.pyc
 </file>
 
 <file path="README.md">

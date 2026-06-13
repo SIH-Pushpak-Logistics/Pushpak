@@ -1,0 +1,20 @@
+# base_iris.param
+# -------------------------------------------------------------
+# FRAME CONFIGURATION
+# -------------------------------------------------------------
+FRAME_CLASS     1      # 1 = Quadcopter
+FRAME_TYPE      1      # 1 = X configuration
+
+# -------------------------------------------------------------
+# BATTERY SIMULATION (CRITICAL FOR ML TRAINING)
+# -------------------------------------------------------------
+BATT_MONITOR    4      # 4 = Analog Voltage and Current
+BATT_CAPACITY   5000   # Battery capacity in mAh (e.g., 5000mAh)
+BATT_VOLT_MAX   16.8   # Max voltage (e.g., 4S LiPo at full charge)
+BATT_VOLT_MIN   13.2   # Min safe voltage before critical failsafe
+BATT_FS_LOW_ACT 1      # 1 = RTL (Return to Launch) on low battery
+BATT_FS_CRT_ACT 2      # 2 = Land on critical battery
+
+# SITL SPECIFIC BATTERY SIMULATION
+SIM_BATT_VOLTAGE 16.8  # Starting voltage for the simulator
+SIM_BATT_CAP_AH  5.0   # Starting capacity in Amp-Hours

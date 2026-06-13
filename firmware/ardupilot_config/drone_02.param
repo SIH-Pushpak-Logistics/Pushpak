@@ -1,0 +1,7 @@
+# drone_02.param
+# System ID (CRITICAL: MUST BE UNIQUE)
+SYSID_THISMAV   2
+
+# MAVLink configuration for local routing
+SERIAL0_BAUD    115
+SERIAL0_PROTOCOL 2
