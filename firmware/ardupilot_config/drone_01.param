@@ -1,0 +1,8 @@
+# drone_01.param
+# System ID (CRITICAL: MUST BE UNIQUE)
+SYSID_THISMAV   1
+
+# MAVLink configuration for local routing
+# Defines where this specific drone outputs its telemetry to MAVROS
+SERIAL0_BAUD    115
+SERIAL0_PROTOCOL 2
