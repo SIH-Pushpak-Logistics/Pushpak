@@ -11,6 +11,16 @@ class StateMachineNode(Node):
         
         self.declare_parameter('drone_id', 'drone_00')
         self.drone_id = self.get_parameter('drone_id').get_parameter_value().string_value
+
+        try:
+            self.redis_client = redis.Redis(host='localhost', port=6379, decode_responses=True)
+            self.redis_client.ping()
+            self.telemetry_stream = f'telemetry:{self.drone_id}:velocity'
+            self.altitude_stream = f'telemetry:{self.drone_id}:altitude_cmd'
+            self.override_stream = f'emergency_override:{self.drone_id}'
+        except redis.ConnectionError as e:
+            self.get_logger().error(f'FATAL: Redis connection failed: {e}')
+            raise SystemExit
         
         self.get_logger().info(f'Initializing Master State Machine for {self.drone_id}...')
 
@@ -21,14 +31,7 @@ class StateMachineNode(Node):
             10
         )
 
-        try:
-            self.redis_client = redis.Redis(host='localhost', port=6379, decode_responses=True)
-            self.redis_client.ping()
-            self.telemetry_stream = f'telemetry:{self.drone_id}:velocity'
-            self.override_stream = f'emergency_override:{self.drone_id}'
-        except redis.ConnectionError as e:
-            self.get_logger().error(f'FATAL: Redis connection failed: {e}')
-            raise SystemExit
+
 
         self.control_timer = self.create_timer(0.05, self.control_loop) # 20Hz
         self.max_data_age = 0.5 
@@ -41,21 +44,30 @@ class StateMachineNode(Node):
         target_vx, target_vy, target_vz, target_wz = 0.0, 0.0, 0.0, 0.0
         executed_source = "FAILSAFE_HOVER"
         
-        # Priority 1: Emergency Override
+        # 1. Pull the absolute newest data from all three streams
         override_data = self.redis_client.xrevrange(self.override_stream, max='+', min='-', count=1)
         vision_data = self.redis_client.xrevrange(self.telemetry_stream, max='+', min='-', count=1)
+        altitude_data = self.redis_client.xrevrange(self.altitude_stream, max='+', min='-', count=1)
 
+        # 2. Priority 1: Global Override dictates everything
         if override_data and not self.is_stale(override_data[0][1].get('timestamp', 0)):
-            payload = override_data[0][1]
-            target_vx, target_vy, target_vz, target_wz = self.extract_vectors(payload)
-            executed_source = "GLOBAL_OVERRIDE"
+            target_vx, target_vy, target_vz, target_wz = self.extract_vectors(override_data[0][1])
                 
-        # Priority 2: Local Vision
-        elif vision_data and not self.is_stale(vision_data[0][1].get('timestamp', 0)):
-            payload = vision_data[0][1]
-            target_vx, target_vy, target_vz, target_wz = self.extract_vectors(payload)
-            executed_source = "LOCAL_VISION"
+        # 3. Priority 2: Merge Local Vision (X/Y) and Local Altitude (Z)
+        else:
+            # Extract X/Y from Raunak's vision node
+            if vision_data and not self.is_stale(vision_data[0][1].get('timestamp', 0)):
+                payload = vision_data[0][1]
+                target_vx = float(payload.get('linear_x', 0.0))
+                target_vy = float(payload.get('linear_y', 0.0))
+                target_wz = float(payload.get('angular_z', 0.0))
+            
+            # Extract Z from Shivam's altitude node
+            if altitude_data and not self.is_stale(altitude_data[0][1].get('timestamp', 0)):
+                payload = altitude_data[0][1]
+                target_vz = float(payload.get('linear_z', 0.0))
 
+        # 4. Execute
         cmd_msg.twist.linear.x = target_vx
         cmd_msg.twist.linear.y = target_vy
         cmd_msg.twist.linear.z = target_vz
