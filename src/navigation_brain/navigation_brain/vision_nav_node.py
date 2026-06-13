@@ -3,7 +3,7 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import TwistStamped
-from cv_bridge import CvBridge
+from cv_bridge import CvBridge, CvBridgeError
 import cv2
 import redis
 import queue
@@ -27,7 +27,12 @@ class VisionNavigationNode(Node):
         pass 
 
     def image_callback(self, msg):
-        cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+        try:
+            # Convert raw ROS image message to OpenCV BGR matrix
+            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+        except CvBridgeError as e:
+            self.get_logger().error(f'CvBridge Translation Failure: {str(e)}')
+            return
         
         # --- RAUNAK: YOUR TASK ---
         # 1. Calculate X/Y drift using optical flow here.
