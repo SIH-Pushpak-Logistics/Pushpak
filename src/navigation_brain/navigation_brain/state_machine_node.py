@@ -42,6 +42,7 @@ class StateMachineNode(Node):
         cmd_msg.header.frame_id = f'{self.drone_id}_base_link'
         
         target_vx, target_vy, target_vz, target_wz = 0.0, 0.0, 0.0, 0.0
+        executed_source = "FAILSAFE_HOVER"
         
         # 1. Pull the absolute newest data from all three streams
         override_data = self.redis_client.xrevrange(self.override_stream, max='+', min='-', count=1)

@@ -21,6 +21,7 @@ class VisionNavigationNode(Node):
         self.get_logger().info(f'Initializing Vision Navigation Node for {self.drone_id}...')
 
         self.bridge = CvBridge()
+        self.camera_subscription = self.create_subscription(Image, '/camera/image_raw', self.image_callback, 10)
 
         # --- Redis Setup ---
         self.redis_publisher = RedisTelemetryPublisher(
@@ -80,7 +81,11 @@ class VisionNavigationNode(Node):
 
         # TODO: OpenCV Lucas-Kanade and Pinhole Conversion
         
-        return cmd_msg
+        # --- RAUNAK: YOUR TASK ---
+        # 1. Calculate X/Y drift using optical flow here.
+        # 2. Push the resulting vector dict into your queue.
+        # DO NOT use time.sleep() or blocking calls here.
+        pass
 
 def main(args=None):
     rclpy.init(args=args)
