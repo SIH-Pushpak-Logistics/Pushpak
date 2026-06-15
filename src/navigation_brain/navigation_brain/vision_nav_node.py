@@ -3,7 +3,6 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 from std_msgs.msg import Float32
-from geometry_msgs.msg import TwistStamped
 from cv_bridge import CvBridge, CvBridgeError
 import cv2
 import message_filters
@@ -59,16 +58,17 @@ class VisionNavigationNode(Node):
 
         current_altitude = alt_msg.data
 
-        # Run vision pipeline
-        velocity_vector = self.process_vision_pipeline(cv_image, current_altitude)
+        vx, vy = self.process_vision_pipeline(
+            cv_image,
+            current_altitude
+        )
 
-        # Send telemetry payload via the delegated publisher class
         self.redis_publisher.send_velocity_vector(
             self.drone_id,
-            velocity_vector.twist.linear.x,
-            velocity_vector.twist.linear.y,
-            velocity_vector.twist.linear.z,
-            velocity_vector.twist.angular.z
+            vx,
+            vy,
+            0.0,
+            0.0
         )
 
     def process_vision_pipeline(self, cv_frame, current_altitude):
@@ -76,14 +76,6 @@ class VisionNavigationNode(Node):
         RAUNAK: Your OpenCV math goes here. 
         You now have current_altitude (Z) perfectly synced with the frame to do your pinhole math.
         """
-        cmd_msg = TwistStamped()
-        cmd_msg.header.stamp = self.get_clock().now().to_msg()
-        cmd_msg.header.frame_id = f'{self.drone_id}_base_link'
-
-        cmd_msg.twist.linear.x = 0.0
-        cmd_msg.twist.linear.y = 0.0
-        cmd_msg.twist.linear.z = 0.0
-        cmd_msg.twist.angular.z = 0.0
 
         # TODO: OpenCV Lucas-Kanade and Pinhole Conversion
         gray = cv2.cvtColor(
@@ -101,7 +93,7 @@ class VisionNavigationNode(Node):
                 minDistance=7,
                 blockSize=7
             )
-            return cmd_msg
+            return 0.0, 0.0
         next_points, status, error = cv2.calcOpticalFlowPyrLK(
             self.prev_gray,
             gray,
@@ -119,7 +111,7 @@ class VisionNavigationNode(Node):
                 minDistance=7,
                 blockSize=7
             )
-            return cmd_msg
+            return 0.0, 0.0
         
         good_new = next_points[status == 1]
         good_old = self.prev_points[status == 1]
@@ -135,7 +127,7 @@ class VisionNavigationNode(Node):
                minDistance=7,
                blockSize=7
            )
-           return cmd_msg
+           return 0.0, 0.0
         
         dx = good_new[:, 0] - good_old[:, 0]
         dy = good_new[:, 1] - good_old[:, 1]
@@ -145,13 +137,13 @@ class VisionNavigationNode(Node):
         vx = (u * current_altitude) / self.fx
         vy = (v * current_altitude) / self.fy
 
-        cmd_msg.twist.linear.x = -self.kp * vx
-        cmd_msg.twist.linear.y = -self.kp * vy
+        vx_command = -self.kp * vx
+        vy_command = -self.kp * vy
 
         self.prev_gray = gray
         self.prev_points = good_new.reshape(-1, 1, 2)
 
-        return cmd_msg
+        return vx_command, vy_command
 
 
 def main(args=None):
