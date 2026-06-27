@@ -1,0 +1,13 @@
+
+# Redis Server & Database files (Temporary/Local)
+redis.zip
+redis_win/
+dump.rdb
+
+# Python Caches
+__pycache__/
+*.pyc
+
+# Local Documentation (Do not check in)
+docs/ML_DATA_PIPELINE.md
+docs/SYSTEM_ARCHITECTURE.md
