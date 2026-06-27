@@ -1,13 +1,57 @@
+# =========================
+# ROS 2 Workspace Artifacts
+# =========================
+build/
+install/
+log/
+core.*
 
-# Redis Server & Database files (Temporary/Local)
+# =========================
+# ML Pipeline & Redis (Local)
+# =========================
 redis.zip
 redis_win/
 dump.rdb
-
-# Python Caches
-__pycache__/
-*.pyc
-
-# Local Documentation (Do not check in)
 docs/ML_DATA_PIPELINE.md
 docs/SYSTEM_ARCHITECTURE.md
+
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.env
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# =========================
+# OS Generated Files
+# =========================
+# Your Mac
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Their Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# =========================
+# IDEs and Editors
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

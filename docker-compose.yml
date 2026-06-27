@@ -1,0 +1,11 @@
+
+services:
+  swarm_brain:
+    build: .
+    container_name: swarm_brain_container
+    volumes:
+      # This line maps your current Mac folder strictly to /workspace in Linux
+      - .:/workspace
+    network_mode: host
+    tty: true
+    stdin_open: true
