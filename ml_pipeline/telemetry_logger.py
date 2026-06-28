@@ -76,33 +76,23 @@ def main():
                 if response:
                     for stream_name, messages in response:
                         for message_id, message_data in messages:
-                            # Step 3: We got a record! Pull out the raw, messy JSON data
-                            raw_json = message_data.get("data")
-                            
-                            if raw_json:
-                                try:
-                                    # Convert the raw text into a Python Dictionary so we can read it easily
-                                    payload = json.loads(raw_json)
-                                    
-                                    # Step 4: Pick out exactly the numbers we care about and write a clean row in our CSV
-                                    writer.writerow({
-                                        "timestamp": payload.get("timestamp"),
-                                        "drone_id": payload.get("drone_id"),
-                                        "linear_x": payload.get("linear_x"),
-                                        "linear_y": payload.get("linear_y"),
-                                        "linear_z": payload.get("linear_z"),
-                                        "angular_z": payload.get("angular_z")
-                                    })
-                                    
-                                    # Force the computer to save it to the hard drive immediately
-                                    csv_file.flush()
-                                    
-                                    # Remember our place in line so we don't read the same record twice!
-                                    streams[stream_name] = message_id
-                                    
-                                except json.JSONDecodeError:
-                                    # If the drone sent garbage data, just ignore it and keep going
-                                    print(f"Warning: Dropped corrupted JSON payload -> {raw_json}")
+                            # Step 3: We got a record! Pull out the flat dictionary directly from Redis
+                            if message_data:
+                                # Step 4: Pick out exactly the numbers we care about and write a clean row in our CSV
+                                writer.writerow({
+                                    "timestamp": message_data.get("timestamp"),
+                                    "drone_id": message_data.get("drone_id"),
+                                    "linear_x": message_data.get("linear_x"),
+                                    "linear_y": message_data.get("linear_y"),
+                                    "linear_z": message_data.get("linear_z"),
+                                    "angular_z": message_data.get("angular_z")
+                                })
+                                
+                                # Force the computer to save it to the hard drive immediately
+                                csv_file.flush()
+                                
+                                # Remember our place in line so we don't read the same record twice!
+                                streams[stream_name] = message_id
                                     
         except KeyboardInterrupt:
             # If the user presses Ctrl+C, stop safely without breaking anything

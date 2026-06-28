@@ -82,9 +82,8 @@ def main():
                     "linear_z": 0.0,
                     "angular_z": 0.0
                 }
-                # Convert our packet into text and queue it up in the pipeline tube
-                stream_entry = {"data": json.dumps(telemetry_payload)}
-                pipeline.xadd(stream_key, stream_entry, id='*')
+                # Queue the packet up directly in the pipeline tube
+                pipeline.xadd(stream_key, telemetry_payload, id='*')
             
             # WHOOSH! Push all queued packets through the tube into Redis instantly
             pipeline.execute()
