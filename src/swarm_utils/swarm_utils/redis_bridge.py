@@ -37,12 +37,12 @@ class RedisTelemetryPublisher:
             finally:
                 self._queue.task_done()
 
-    def send_velocity_vector(self, drone_id, vx, vy, vz, wz):
+    def send_velocity_vector(self, drone_id, timestamp_sec, vx, vy, vz, wz):
         """
         Enforces the data contract. Coerces all floats to strict strings.
         """
         payload = {
-            'timestamp': str(time.time()),
+            'timestamp': str(timestamp_sec),
             'drone_id': str(drone_id),
             'linear_x': f"{float(vx):.4f}",
             'linear_y': f"{float(vy):.4f}",
