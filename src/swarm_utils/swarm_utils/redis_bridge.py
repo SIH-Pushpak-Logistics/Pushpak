@@ -37,7 +37,7 @@ class RedisTelemetryPublisher:
             finally:
                 self._queue.task_done()
 
-    def send_velocity_vector(self, drone_id, timestamp_sec, vx, vy, vz, wz):
+    def send_velocity_vector(self, drone_id, timestamp_sec, vx, vy, vz, wz, cut_motors=False):
         """
         Enforces the data contract. Coerces all floats to strict strings.
         """
@@ -48,6 +48,7 @@ class RedisTelemetryPublisher:
             'linear_y': f"{float(vy):.4f}",
             'linear_z': f"{float(vz):.4f}",
             'angular_z': f"{float(wz):.4f}",
+            'cut_motors': str(cut_motors)
         }
         try:
             self._queue.put_nowait(payload)
