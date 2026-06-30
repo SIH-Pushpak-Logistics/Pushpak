@@ -48,7 +48,9 @@ class RedisTelemetryPublisher:
             'linear_y': f"{float(vy):.4f}",
             'linear_z': f"{float(vz):.4f}",
             'angular_z': f"{float(wz):.4f}",
-            'cut_motors': str(cut_motors)
+            'cut_motors': str(cut_motors),
+            'is_valid': str(is_valid)
+            
         }
         try:
             self._queue.put_nowait(payload)
