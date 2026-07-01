@@ -54,7 +54,11 @@ def main():
     file_exists = os.path.isfile(csv_filename)
     
     # These are the column names at the top of our spreadsheet
-    headers = ["timestamp", "drone_id", "linear_x", "linear_y", "linear_z", "angular_z"]
+    headers = [
+        "timestamp", "drone_id", "linear_x", "linear_y", "linear_z", "angular_z",
+        "motor_1_pwm", "motor_2_pwm", "motor_3_pwm", "motor_4_pwm",
+        "total_current_amps", "battery_voltage"
+    ]
 
     print(f"Starting ML Data Pipeline Logger...")
     print(f"Logging normalized data to {csv_filename} at 10Hz. Press Ctrl+C to stop.")
@@ -78,14 +82,19 @@ def main():
                         for message_id, message_data in messages:
                             # Step 3: We got a record! Pull out the flat dictionary directly from Redis
                             if message_data:
-                                # Step 4: Pick out exactly the numbers we care about and write a clean row in our CSV
                                 writer.writerow({
                                     "timestamp": message_data.get("timestamp"),
                                     "drone_id": message_data.get("drone_id"),
                                     "linear_x": message_data.get("linear_x"),
                                     "linear_y": message_data.get("linear_y"),
                                     "linear_z": message_data.get("linear_z"),
-                                    "angular_z": message_data.get("angular_z")
+                                    "angular_z": message_data.get("angular_z"),
+                                    "motor_1_pwm": message_data.get("motor_1_pwm"),
+                                    "motor_2_pwm": message_data.get("motor_2_pwm"),
+                                    "motor_3_pwm": message_data.get("motor_3_pwm"),
+                                    "motor_4_pwm": message_data.get("motor_4_pwm"),
+                                    "total_current_amps": message_data.get("total_current_amps"),
+                                    "battery_voltage": message_data.get("battery_voltage")
                                 })
                                 
                                 # Force the computer to save it to the hard drive immediately
