@@ -78,7 +78,8 @@ class VisionNavigationNode(Node):
             image_msg.header.stamp.sec
             + image_msg.header.stamp.nanosec *1e-9
         )
-        vx, vy = self.process_vision_pipeline(
+
+        is_valid, vx, vy = self.process_vision_pipeline(
             cv_image,
             current_altitude,
             gyro_y
@@ -90,7 +91,8 @@ class VisionNavigationNode(Node):
             vx,
             vy,
             0.0,
-            0.0
+            0.0,
+            is_valid=is_valid
         )
 
     def process_vision_pipeline(
@@ -120,7 +122,7 @@ class VisionNavigationNode(Node):
                 minDistance=7,
                 blockSize=7
             )
-            return 0.0, 0.0
+            return False, 0.0, 0.0
         next_points, status, error = cv2.calcOpticalFlowPyrLK(
             self.prev_gray,
             gray,
@@ -138,7 +140,7 @@ class VisionNavigationNode(Node):
                 minDistance=7,
                 blockSize=7
             )
-            return 0.0, 0.0
+            return False, 0.0, 0.0
         
         good_new = next_points[status == 1]
         good_old = self.prev_points[status == 1]
@@ -154,7 +156,7 @@ class VisionNavigationNode(Node):
                minDistance=7,
                blockSize=7
            )
-           return 0.0, 0.0
+           return False, 0.0, 0.0
         
         dx = good_new[:, 0] - good_old[:, 0]
         dy = good_new[:, 1] - good_old[:, 1]
@@ -174,7 +176,7 @@ class VisionNavigationNode(Node):
         self.prev_gray = gray
         self.prev_points = good_new.reshape(-1, 1, 2)
 
-        return vx_command, vy_command
+        return True, vx_command, vy_command
 
 
 def main(args=None):
