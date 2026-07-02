@@ -71,7 +71,8 @@ class VisionNavigationNode(Node):
             return
 
         current_altitude = alt_msg.data
-
+        
+        gyro_x = imu_msg.angular_velocity.x
         gyro_y = imu_msg.angular_velocity.y
 
         timestamp_sec = (
@@ -82,6 +83,7 @@ class VisionNavigationNode(Node):
         is_valid, vx, vy = self.process_vision_pipeline(
             cv_image,
             current_altitude,
+            gyro_x,
             gyro_y
         )
 
@@ -99,6 +101,7 @@ class VisionNavigationNode(Node):
         self,
         cv_frame,
         current_altitude,
+        gyro_x,
         gyro_y
     ):
         """
@@ -127,7 +130,9 @@ class VisionNavigationNode(Node):
             self.prev_gray,
             gray,
             self.prev_points,
-            None
+            None,
+            winSize=(21, 21),
+            maxLevel=3
         )
         if next_points is None:
 
@@ -165,7 +170,7 @@ class VisionNavigationNode(Node):
         v_raw = dy.mean()
 
         u_translation = u_raw - (gyro_y * self.fx)
-        v_translation = v_raw
+        v_translation = v_raw - (gyro_x * self.fy)
 
         vx = (u_translation * current_altitude) / self.fx
         vy = (v_translation * current_altitude) / self.fy
