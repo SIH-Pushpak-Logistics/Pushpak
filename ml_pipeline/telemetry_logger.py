@@ -56,8 +56,9 @@ def main():
     # These are the column names at the top of our spreadsheet
     headers = [
         "timestamp", "drone_id", "linear_x", "linear_y", "linear_z", "angular_z",
+        "wind_speed_x", "ambient_temp_c",
         "motor_1_pwm", "motor_2_pwm", "motor_3_pwm", "motor_4_pwm",
-        "total_current_amps", "battery_voltage"
+        "total_current_amps", "battery_voltage_v"
     ]
 
     print(f"Starting ML Data Pipeline Logger...")
@@ -89,12 +90,14 @@ def main():
                                     "linear_y": message_data.get("linear_y"),
                                     "linear_z": message_data.get("linear_z"),
                                     "angular_z": message_data.get("angular_z"),
+                                    "wind_speed_x": message_data.get("wind_speed_x"),
+                                    "ambient_temp_c": message_data.get("ambient_temp_c"),
                                     "motor_1_pwm": message_data.get("motor_1_pwm"),
                                     "motor_2_pwm": message_data.get("motor_2_pwm"),
                                     "motor_3_pwm": message_data.get("motor_3_pwm"),
                                     "motor_4_pwm": message_data.get("motor_4_pwm"),
                                     "total_current_amps": message_data.get("total_current_amps"),
-                                    "battery_voltage": message_data.get("battery_voltage")
+                                    "battery_voltage_v": message_data.get("battery_voltage_v")
                                 })
                                 
                                 # Force the computer to save it to the hard drive immediately

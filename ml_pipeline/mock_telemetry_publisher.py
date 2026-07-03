@@ -61,6 +61,45 @@ def main():
     try:
         TOTAL_RECORDS = args.records  # How many fake speed readings we want to create
         BATCH_SIZE = min(2500, TOTAL_RECORDS)       # How many we send to the bucket at the same time (for speed)
+        
+        # Pre-calculate the total expected capacity drawn to dynamically tune the logistic curve
+        print("Pre-calculating total capacity drawn...")
+        temp_capacity = 0.0
+        for idx in range(TOTAL_RECORDS):
+            t = idx * 0.1
+            p = idx / max(1, TOTAL_RECORDS - 1)
+            
+            # Replicate velocity math (noise components omitted for deterministic expectation)
+            linear_x = 2.5 * math.sin(0.05 * t) + 1.5 * math.sin(0.15 * t + 1.0) + 1.0 * math.sin(0.3 * t + 2.0)
+            linear_y = 2.5 * math.sin(0.04 * t + 0.5) + 1.5 * math.sin(0.12 * t + 1.5) + 1.0 * math.sin(0.25 * t + 3.0)
+            
+            if p < 0.05:
+                linear_z = 1.2 * math.sin(math.pi * (p / 0.05))
+            elif p > 0.95:
+                linear_z = -0.8 * math.sin(math.pi * ((1.0 - p) / 0.05))
+            else:
+                linear_z = 0.05 * math.sin(0.02 * t)
+                
+            angular_z = 0.02 * math.sin(0.01 * t)
+            maneuver_interval = 1000.0
+            time_since_maneuver = t % maneuver_interval
+            center_of_maneuver = 500.0
+            if abs(time_since_maneuver - center_of_maneuver) < 20.0:
+                direction = 1 if int(t / maneuver_interval) % 2 == 0 else -1
+                pulse = math.exp(-((time_since_maneuver - center_of_maneuver) ** 2) / (2 * (5.0 ** 2)))
+                angular_z += direction * 0.5 * pulse
+
+            base_current = 15.0 + 2.0 * abs(linear_x) + 2.0 * abs(linear_y) + 3.0 * linear_z + 1.0 * abs(angular_z)
+            total_current_amps = max(5.0, min(30.0, base_current))
+            temp_capacity += total_current_amps * (0.1 / 3600.0)
+
+        final_expected_capacity = max(0.001, temp_capacity)
+        cliff_capacity = 0.5 * final_expected_capacity
+        k = 12.0 / final_expected_capacity
+        print(f"Pre-calculation complete. Expected capacity: {final_expected_capacity:.4f} Ah, k={k:.4f}, cliff={cliff_capacity:.4f} Ah")
+
+        # Initialize the actual capacity state tracker
+        capacity_drawn = 0.0
         print(f"Generating {TOTAL_RECORDS} records as fast as possible...")
         
         # We loop over the total records in chunks
@@ -100,17 +139,20 @@ def main():
                     pulse = math.exp(-((time_since_maneuver - center_of_maneuver) ** 2) / (2 * (5.0 ** 2)))
                     angular_z += direction * 0.5 * pulse
 
-                # Base voltage discharge curve (6S LiPo model)
-                v_base = 23.0 + 2.2 * math.exp(-30.0 * p) - 0.75 * p - 1.25 * math.exp(25.0 * (p - 1.0))
-                
                 # Total current draw correlated with flight velocity/effort (pitch, roll, vertical, yaw)
                 base_current = 15.0 + 2.0 * abs(linear_x) + 2.0 * abs(linear_y) + 3.0 * linear_z + 1.0 * abs(angular_z) + random.uniform(-1.0, 1.0)
                 total_current_amps = max(5.0, min(30.0, base_current))
                 
+                # Stateful Euler integration for capacity drawn (Ah)
+                capacity_drawn += total_current_amps * (0.1 / 3600.0)
+                
+                # Battery voltage base curve (Logistic decay model)
+                v_logistic = 21.0 + (4.2 / (1.0 + math.exp(k * (capacity_drawn - cliff_capacity))))
+                
                 # Battery voltage under load (base voltage - sag + sensor noise)
                 voltage_sag = 0.01 * total_current_amps
                 sensor_noise = random.normalvariate(0.0, 0.01)
-                battery_voltage = max(20.0, min(26.0, v_base - voltage_sag + sensor_noise))
+                battery_voltage_v = max(20.0, min(26.0, v_logistic - voltage_sag + sensor_noise))
                 
                 # Base hover throttle + adjustments for motor PWM outputs (Quad-X mixing)
                 base_pwm = 1100.0 + (total_current_amps - 5.0) * (800.0 / 25.0)
@@ -119,7 +161,11 @@ def main():
                 m3 = base_pwm - 40.0 * linear_x - 40.0 * linear_y + 100.0 * angular_z + random.uniform(-15, 15)
                 m4 = base_pwm - 40.0 * linear_x + 40.0 * linear_y - 100.0 * angular_z + random.uniform(-15, 15)
                 
-                # Create the physical data packet
+                # Environment variables
+                wind_speed_x = 5.0 + random.uniform(-1.0, 1.0)
+                ambient_temp_c = 25.0 + random.uniform(-1.5, 1.5)
+                
+                # Create the physical data packet (Strict 1D API Schema)
                 telemetry_payload = {
                     "timestamp": round(t, 1),
                     "drone_id": "drone_00",
@@ -127,12 +173,14 @@ def main():
                     "linear_y": round(linear_y, 3),
                     "linear_z": round(linear_z, 3),
                     "angular_z": round(angular_z, 3),
+                    "wind_speed_x": round(wind_speed_x, 2),
+                    "ambient_temp_c": round(ambient_temp_c, 2),
                     "motor_1_pwm": int(max(1000, min(2000, m1))),
                     "motor_2_pwm": int(max(1000, min(2000, m2))),
                     "motor_3_pwm": int(max(1000, min(2000, m3))),
                     "motor_4_pwm": int(max(1000, min(2000, m4))),
                     "total_current_amps": round(total_current_amps, 2),
-                    "battery_voltage": round(battery_voltage, 3)
+                    "battery_voltage_v": round(battery_voltage_v, 3)
                 }
                 # Queue the packet up directly in the pipeline tube
                 pipeline.xadd(stream_key, telemetry_payload, id='*')
