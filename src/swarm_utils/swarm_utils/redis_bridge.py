@@ -37,7 +37,16 @@ class RedisTelemetryPublisher:
             finally:
                 self._queue.task_done()
 
-    def send_velocity_vector(self, drone_id, timestamp_sec, vx, vy, vz, wz, cut_motors=False):
+    def send_velocity_vector(self,
+        drone_id,
+        timestamp_sec,
+        vx,
+        vy,
+        vz,
+        wz,
+        cut_motors=False,
+        is_valid=True
+    ):
         """
         Enforces the data contract. Coerces all floats to strict strings.
         """
