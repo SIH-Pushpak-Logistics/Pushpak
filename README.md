@@ -15,6 +15,11 @@ Node: vision_nav_node.py
 Role: Calculate X/Y drift velocity using Lucas-Kanade optical flow.
 Strict Constraints: * Must use message_filters.ApproximateTimeSynchronizer to time-sync the camera frames (/camera/image_raw) with the altimeter (/drone/altitude) to accurately perform the pinhole camera conversion ($V_x = \frac{u \cdot Z}{f_x}$).
 Must utilize the queue.Queue(maxsize=5) background thread for Redis I/O.
+
+NEW TASK/DIRECTIVE
+
+Must extract timestamps from the ROS 2 headers to calculate the precise time delta ($\Delta t$) between frames. Velocity calculations must rigidly follow $V_x = \frac{u \cdot Z}{f_x \cdot \Delta t}$. Calculating raw displacement per frame is strictly forbidden.
+
 Forbidden: Subscribing to or publishing to /mavros/setpoint_velocity/cmd_vel.
 
 B. The Altitude & Landing Layer (Owner: Shivam)
@@ -23,6 +28,11 @@ Role: Calculate the Z-axis velocity required to hold altitude or execute a preci
 Strict Constraints:
 Must read from the altimeter and output a proportional $V_z$ command.
 Must clamp maximum ascent/descent speeds to prevent simulation physics instability.
+
+NEW TASK/DIRECTIVE
+
+Must implement an explicit max_ascent_speed (e.g., 1.5 m/s) to clamp the P-controller's upward velocity. Uncapped positive Z-axis commands will destabilize the simulation physics.
+
 Forbidden: Publishing directly to MAVROS. Output must go strictly to the designated Redis stream.
 
 C. The Machine Learning Data Pipeline (Owners: Bhavya & Priya)
@@ -45,6 +55,32 @@ E. The Master State Machine & Overwatch (Owner: Lead Architect)
 
 Node: state_machine_node.py
 Role: The absolute brain of the drone. Ingests all Redis streams, calculates staleness, handles decentralized swarm collision overrides, and executes motor commands.
+
+NEW TASK/DIRECTIVE
+
+Node: state_machine_node.py
+
+Strict Constraints:
+
+Asynchronous I/O: The 20Hz control loop must be entirely non-blocking. Redis polling (xrevrange) must be offloaded to a background threading.Thread that updates a local, thread-safe state dictionary.
+
+The MAVROS Handshake: Must publish 0.0 m/s velocities for 2 seconds, explicitly call the /mavros/set_mode service to request OFFBOARD mode, and wait for confirmation before calling the arming service.
+
+F. The Simulation Orchestration (The Spine) (Owner: Lead Architect)
+
+   File: sitl_bringup.launch.py (inside drone_description/launch/)
+
+Role: The master orchestrator that bridges the ROS 2 software stack with the Gazebo physics engine.
+
+Strict Sequence:
+
+Initialize robot_state_publisher to broadcast the URDF TF tree.
+
+Launch the Gazebo server and client.
+
+Execute spawn_entity.py to inject the drone into the simulation.
+
+Trigger swarm_bringup.launch.py only after physics are confirmed running.
 
 3. The Data Contract (Stream & Topic Registry)
 This is the immutable data structure of the system. Any deviation in naming conventions or JSON payloads will result in immediate node failure.
@@ -90,4 +126,4 @@ Priority 1: Swarm Override. If a valid, non-stale vector exists in emergency_ove
 
 Priority 2: Local Perception Integration. Pull the latest X/Y vector from telemetry:<drone_id>:velocity and the Z vector from telemetry:<drone_id>:altitude_cmd. Merge them into a single TwistStamped message.
 
-Priority 3: The Staleness Failsafe. The state machine compares the payload timestamp against the system clock. If the delta exceeds 0.5 seconds, the data is stale. The drone drops the command and defaults to a zero-velocity hover to prevent uncontrolled drift.
+Priority 3: The Staleness Failsafe. The state machine compares the payload timestamp against the system clock. If the delta exceeds 0.3 seconds (adjusted for 15Hz camera processing limits), the data is stale. The drone drops the command and defaults to a zero-velocity hover.
