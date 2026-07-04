@@ -1,11 +1,12 @@
-
 services:
   swarm_brain:
     build: .
     container_name: swarm_brain_container
+    ports:
+      - "8765:8765" # Foxglove WebSocket Port
     volumes:
-      # This line maps your current Mac folder strictly to /workspace in Linux
       - .:/workspace
-    network_mode: host
     tty: true
     stdin_open: true
+    # We remove 'command' so the container boots and stays alive infinitely.
+    # You will manually exec into it to build and launch, preserving your debug environment if a node crashes.
