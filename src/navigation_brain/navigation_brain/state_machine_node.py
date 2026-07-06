@@ -2,7 +2,7 @@
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import TwistStamped
-from mavros_msgs.msg import RCIn
+from mavros_msgs.msg import RCIn, State
 from mavros_msgs.srv import CommandBool, SetMode
 from rclpy.qos import qos_profile_sensor_data
 from swarm_utils.redis_bridge import RedisTelemetrySubscriber
@@ -36,6 +36,12 @@ class StateMachineNode(Node):
         self.rc_sub = self.create_subscription(
             RCIn, '/mavros/rc/in', self.rc_callback, qos_profile_sensor_data 
         )
+        
+        # MAVROS State Overwatch
+        self.current_mavros_state = State()
+        self.state_sub = self.create_subscription(
+            State, '/mavros/state', self.mavros_state_callback, 10
+        )
 
         # State Variables
         self.flight_state = 'BOOTING'
@@ -51,6 +57,10 @@ class StateMachineNode(Node):
             if msg.channels[7] > 1500:
                 self.get_logger().fatal("HARDWARE KILL SWITCH ACTIVATED! DISARMING!")
                 self.disarm_drone()
+                
+    def mavros_state_callback(self, msg):
+        """ Continuous tracking of the physical hardware state. """
+        self.current_mavros_state = msg
 
     def control_loop(self):
         cmd_msg = TwistStamped()
@@ -79,7 +89,16 @@ class StateMachineNode(Node):
             return # Terminal state
 
         # -------------------------------------------------------------
-        # PHASE 2: ACTIVE FLIGHT (Zero Network Blocking)
+        # PHASE 2: AUTHORITY OVERWATCH
+        # -------------------------------------------------------------
+        if self.flight_state == 'FLYING':
+            if self.current_mavros_state.mode != "OFFBOARD":
+                self.get_logger().error("CRITICAL: OFFBOARD mode lost externally! Relinquishing control.")
+                self.trigger_boot_retry()
+                return
+
+        # -------------------------------------------------------------
+        # PHASE 3: ACTIVE FLIGHT (Zero Network Blocking)
         # -------------------------------------------------------------
         target_vx, target_vy, target_vz, target_wz = 0.0, 0.0, 0.0, 0.0
         
