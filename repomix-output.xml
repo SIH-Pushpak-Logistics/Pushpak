@@ -53,18 +53,26 @@ src/
     launch/
       swarm_bringup.launch.py
   drone_description/
+    launch/
+      display.launch.py
+      sitl_bringup.launch.py
     urdf/
       drone.urdf.xacro
     CMakeLists.txt
     package.xml
   navigation_brain/
+    msg/
+      OpticalFlow.msg
     navigation_brain/
       __init__.py
+      anti_sway_filter.py
       landing_state_node.py
       state_machine_node.py
       vision_nav_node.py
     resource/
       navigation_brain
+    scripts/
+      lqr_tuner.py
     package.xml
     setup.py
   swarm_utils/
@@ -91,81 +99,313 @@ README.md
 <files>
 This section contains the contents of the repository's files.
 
-<file path="src/drone_description/urdf/drone.urdf.xacro">
+<file path="src/drone_description/launch/sitl_bringup.launch.py">
+import os
+from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
+from launch.actions import IncludeLaunchDescription, TimerAction, DeclareLaunchArgument
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch_ros.actions import Node
+from launch.substitutions import Command, LaunchConfiguration
 
+def generate_launch_description():
+    drone_desc_dir = get_package_share_directory('drone_description')
+    drone_bringup_dir = get_package_share_directory('drone_bringup')
+    gazebo_ros_dir = get_package_share_directory('gazebo_ros')
+
+    xacro_file = os.path.join(drone_desc_dir, 'urdf', 'drone.urdf.xacro')
+
+    # 1. Enforce the Global Time Domain
+    use_sim_time = LaunchConfiguration('use_sim_time', default='true')
+
+    # 2. Boot the Transform Tree
+    robot_state_publisher = Node(
+        package='robot_state_publisher',
+        executable='robot_state_publisher',
+        output='screen',
+        parameters=[{
+            'robot_description': Command(['xacro ', xacro_file]), 
+            'use_sim_time': use_sim_time
+        }]
+    )
+
+    # 3. Boot Gazebo Physics
+    gazebo_server = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([os.path.join(gazebo_ros_dir, 'launch', 'gzserver.launch.py')]),
+        launch_arguments={'pause': 'false', 'use_sim_time': use_sim_time}.items()
+    )
+    
+    gazebo_client = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([os.path.join(gazebo_ros_dir, 'launch', 'gzclient.launch.py')])
+    )
+
+    # 4. Inject the Physical Drone Model (Delayed to let Gazebo boot)
+    spawn_entity = Node(
+        package='gazebo_ros',
+        executable='spawn_entity.py',
+        arguments=['-topic', 'robot_description', '-entity', 'swarm_drone', '-z', '0.2'],
+        output='screen'
+    )
+
+    # 5. Boot the Logic Brains (Delayed to let the drone spawn)
+    swarm_bringup = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([os.path.join(drone_bringup_dir, 'launch', 'swarm_bringup.launch.py')]),
+        launch_arguments={'use_sim_time': use_sim_time}.items()
+    )
+
+    return LaunchDescription([
+        DeclareLaunchArgument('use_sim_time', default_value='true'),
+        robot_state_publisher,
+        gazebo_server,
+        gazebo_client,
+        TimerAction(period=3.0, actions=[spawn_entity]),
+        TimerAction(period=6.0, actions=[swarm_bringup])
+    ])
 </file>
 
-<file path="src/drone_description/CMakeLists.txt">
-cmake_minimum_required(VERSION 3.8)
-project(drone_description)
-
-if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic)
-endif()
-
-# find dependencies
-find_package(ament_cmake REQUIRED)
-# uncomment the following section in order to fill in
-# further dependencies manually.
-# find_package(<dependency> REQUIRED)
-
-if(BUILD_TESTING)
-  find_package(ament_lint_auto REQUIRED)
-  # the following line skips the linter which checks for copyrights
-  # comment the line when a copyright and license is added to all source files
-  set(ament_cmake_copyright_FOUND TRUE)
-  # the following line skips cpplint (only works in a git repo)
-  # comment the line when this package is in a git repo and when
-  # a copyright and license is added to all source files
-  set(ament_cmake_cpplint_FOUND TRUE)
-  ament_lint_auto_find_test_dependencies()
-endif()
-
-ament_package()
+<file path="src/navigation_brain/msg/OpticalFlow.msg">
+std_msgs/Header header
+float64 velocity_x
+float64 velocity_y
+bool is_valid
 </file>
 
-<file path="src/drone_description/package.xml">
-<?xml version="1.0"?>
-<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
-<package format="3">
-  <name>drone_description</name>
-  <version>0.0.0</version>
-  <description>TODO: Package description</description>
-  <maintainer email="root@todo.todo">root</maintainer>
-  <license>TODO: License declaration</license>
+<file path="src/navigation_brain/navigation_brain/anti_sway_filter.py">
+#!/usr/bin/env python3
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import Float32
+from geometry_msgs.msg import Vector3
+from drone_interfaces.msg import OpticalFlow  # FORCED API CONTRACT
+import math
+from swarm_utils.redis_bridge import RedisTelemetryPublisher
 
-  <buildtool_depend>ament_cmake</buildtool_depend>
+class AntiSwayFilterNode(Node):
+    def __init__(self):
+        super().__init__('anti_sway_filter_node')
+        self.get_logger().info('Initializing LQR Anti-Sway Filter with Alpha-Beta Tracking...')
 
-  <test_depend>ament_lint_auto</test_depend>
-  <test_depend>ament_lint_common</test_depend>
+        self.declare_parameter('drone_id', 'drone_00')
+        self.drone_id = self.get_parameter('drone_id').get_parameter_value().string_value
 
-  <export>
-    <build_type>ament_cmake</build_type>
-  </export>
-</package>
+        # --- Load LQR Gains from YAML (The K Matrix) ---
+        self.declare_parameter('k_theta_y', 0.0) 
+        self.declare_parameter('k_theta_dot_y', 0.0)
+        self.declare_parameter('k_theta_x', 0.0)
+        self.declare_parameter('k_theta_dot_x', 0.0)
+
+        self.k_theta_y = self.get_parameter('k_theta_y').get_parameter_value().double_value
+        self.k_theta_dot_y = self.get_parameter('k_theta_dot_y').get_parameter_value().double_value
+        self.k_theta_x = self.get_parameter('k_theta_x').get_parameter_value().double_value
+        self.k_theta_dot_x = self.get_parameter('k_theta_dot_x').get_parameter_value().double_value
+
+        # --- Alpha-Beta Filter State Persistence ---
+        # Alpha controls position tracking (high = trust sensor, low = trust model)
+        # Beta controls velocity tracking (high = fast response to changes, low = smooth)
+        self.alpha = 0.4 
+        self.beta = 0.05 
+        
+        self.theta_x_est = 0.0
+        self.theta_x_vel_est = 0.0
+        self.theta_y_est = 0.0
+        self.theta_y_vel_est = 0.0
+
+        # Raw velocities from Raunak's Optical Flow
+        self.raw_vx = 0.0 
+        self.raw_vy = 0.0
+        self.vision_is_valid = False
+
+        self.last_theta_time = None
+
+        # --- Network I/O ---
+        self.redis_publisher = RedisTelemetryPublisher(
+            stream_name=f'telemetry:{self.drone_id}:velocity',
+            logger=self.get_logger()
+        )
+
+        # --- Subscriptions ---
+        # 1. Subscribe to the explicit API contract for optical flow
+        self.vision_sub = self.create_subscription(
+            OpticalFlow, '/internal/raw_optical_flow', self.vision_callback, 10
+        )
+        # 2. Subscribe to the secondary camera's payload tracking output
+        self.payload_angle_sub = self.create_subscription(
+            Vector3, '/payload/swing_angle', self.angle_callback, 10
+        )
+
+        # --- Control Loop ---
+        self.control_timer = self.create_timer(0.02, self.lqr_control_loop) # 50Hz
+
+    def vision_callback(self, msg):
+        """ Ingest explicit optical flow velocity and validity state """
+        self.raw_vx = msg.velocity.x
+        self.raw_vy = msg.velocity.y
+        self.vision_is_valid = msg.is_valid 
+
+    def angle_callback(self, msg):
+        """ 
+        Ingest theta from the secondary camera and apply Alpha-Beta tracking.
+        msg.x = raw theta_x
+        msg.y = raw theta_y
+        """
+        current_time = self.get_clock().now()
+        
+        if self.last_theta_time is not None:
+            dt = (current_time - self.last_theta_time).nanoseconds / 1e9
+            if dt > 0:
+                raw_x = msg.x
+                raw_y = msg.y
+
+                # 1. Prediction Step
+                pred_x = self.theta_x_est + (self.theta_x_vel_est * dt)
+                pred_y = self.theta_y_est + (self.theta_y_vel_est * dt)
+
+                # 2. Calculate Residual
+                residual_x = raw_x - pred_x
+                residual_y = raw_y - pred_y
+
+                # 3. Update Step
+                self.theta_x_est = pred_x + (self.alpha * residual_x)
+                self.theta_x_vel_est = self.theta_x_vel_est + ((self.beta / dt) * residual_x)
+
+                self.theta_y_est = pred_y + (self.alpha * residual_y)
+                self.theta_y_vel_est = self.theta_y_vel_est + ((self.beta / dt) * residual_y)
+                
+        self.last_theta_time = current_time
+
+    def lqr_control_loop(self):
+        """ Computes the control law u = -Kx using Alpha-Beta estimates """
+        current_time_sec = self.get_clock().now().nanoseconds / 1e9
+
+        if not self.vision_is_valid:
+            self.redis_publisher.send_velocity_vector(
+                self.drone_id, current_time_sec, 0.0, 0.0, 0.0, 0.0, is_valid=False
+            )
+            return
+
+        # 1. Compute LQR Control Effort using Alpha-Beta Estimated States
+        # u = -K * x 
+        accel_x_correction = -(self.k_theta_x * self.theta_x_est + self.k_theta_dot_x * self.theta_x_vel_est)
+        accel_y_correction = -(self.k_theta_y * self.theta_y_est + self.k_theta_dot_y * self.theta_y_vel_est)
+
+        # 2. Integrate Acceleration into a Velocity Command
+        dt = 0.02
+        lqr_vx = accel_x_correction * dt
+        lqr_vy = accel_y_correction * dt
+
+        # 3. Superposition (Combine Base Hover + LQR Correction)
+        final_vx = self.raw_vx + lqr_vx
+        final_vy = self.raw_vy + lqr_vy
+
+        # 4. Push to the Master State Machine via Redis
+        self.redis_publisher.send_velocity_vector(
+            self.drone_id, 
+            current_time_sec, 
+            final_vx, 
+            final_vy, 
+            0.0,  
+            0.0, 
+            is_valid=True
+        )
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = AntiSwayFilterNode()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        node.get_logger().info("Shutting down Anti-Sway Filter...")
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
 </file>
 
-<file path="firmware/ardupilot_config/base_iris.param">
-# base_iris.param
-# -------------------------------------------------------------
-# FRAME CONFIGURATION
-# -------------------------------------------------------------
-FRAME_CLASS     1      # 1 = Quadcopter
-FRAME_TYPE      1      # 1 = X configuration
+<file path="src/navigation_brain/scripts/lqr_tuner.py">
+#!/usr/bin/env python3
+import numpy as np
+import scipy.linalg
+import yaml
+import os
 
-# -------------------------------------------------------------
-# BATTERY SIMULATION (CRITICAL FOR ML TRAINING)
-# -------------------------------------------------------------
-BATT_MONITOR    4      # 4 = Analog Voltage and Current
-BATT_CAPACITY   5000   # Battery capacity in mAh (e.g., 5000mAh)
-BATT_VOLT_MAX   16.8   # Max voltage (e.g., 4S LiPo at full charge)
-BATT_VOLT_MIN   13.2   # Min safe voltage before critical failsafe
-BATT_FS_LOW_ACT 1      # 1 = RTL (Return to Launch) on low battery
-BATT_FS_CRT_ACT 2      # 2 = Land on critical battery
+def calculate_lqr_gains():
+    # --- Physical System Parameters ---
+    g = 9.81      # Gravity (m/s^2)
+    L = 0.25      # Tether length (meters)
 
-# SITL SPECIFIC BATTERY SIMULATION
-SIM_BATT_VOLTAGE 16.8  # Starting voltage for the simulator
-SIM_BATT_CAP_AH  5.0   # Starting capacity in Amp-Hours
+    print(f"--- LQR Tuning Initialized ---")
+    print(f"Physical Parameters: L={L}m, g={g}m/s^2")
+
+    # --- System Matrices (State: [x, x_dot, theta, theta_dot]) ---
+    # The A matrix (Dynamics)
+    A = np.array([
+        [0, 1,  0,    0],
+        [0, 0,  0,    0],
+        [0, 0,  0,    1],
+        [0, 0, -g/L,  0]
+    ])
+
+    # The B matrix (Control Input - Acceleration)
+    B = np.array([
+        [0],
+        [1],
+        [0],
+        [-1/L]
+    ])
+
+    # --- Tuning Matrices (The Physics Budget) ---
+    # Q = diag([q_x, q_x_dot, q_theta, q_theta_dot])
+    # q_x = 0 because we are a Velocity Damper, not a position-hold node.
+    Q = np.diag([1e-6, 10.0, 100.0, 10.0])
+    
+    # R = Control effort penalty (Massive Tarot 650 frame requires smooth, non-violent thrust)
+    R = np.array([[50.0]])
+
+    # --- Solve the Continuous Algebraic Riccati Equation (CARE) ---
+    print("\nSolving Riccati Equation...")
+    P = scipy.linalg.solve_continuous_are(A, B, Q, R)
+
+    # --- Compute the Optimal Gain Matrix K ---
+    # K = R^-1 * B^T * P
+    K = np.linalg.inv(R).dot(B.T).dot(P)
+    
+    print("\nOptimal Gain Matrix K:")
+    print(np.round(K, 4))
+
+    # --- Extract Specific Axis Gains ---
+    # Because a pendulum is physically symmetrical on the X and Y axes,
+    # the exact same gains apply to both the roll/sway and pitch/surge dynamics.
+    # K matrix structure: [k_x, k_x_dot, k_theta, k_theta_dot]
+    k_theta = float(K[0, 2])
+    k_theta_dot = float(K[0, 3])
+
+    print(f"\nExtracted Gains:")
+    print(f"k_theta: {k_theta:.4f}")
+    print(f"k_theta_dot: {k_theta_dot:.4f}")
+
+    # --- Generate ROS 2 Parameter Configuration ---
+    yaml_data = {
+        'anti_sway_filter_node': {
+            'ros__parameters': {
+                'k_theta_x': k_theta,
+                'k_theta_dot_x': k_theta_dot,
+                'k_theta_y': k_theta,
+                'k_theta_dot_y': k_theta_dot
+            }
+        }
+    }
+
+    # Save to the config directory
+    output_path = "sway_params.yaml"
+    with open(output_path, 'w') as outfile:
+        yaml.dump(yaml_data, outfile, default_flow_style=False)
+    
+    print(f"\nSUCCESS: LQR configuration saved to {output_path}")
+
+if __name__ == '__main__':
+    calculate_lqr_gains()
 </file>
 
 <file path="firmware/ardupilot_config/drone_01.param">
@@ -522,24 +762,29 @@ def generate_launch_description():
         description='Unique identifier for the swarm drone'
     )
     
+    use_sim_time_arg = DeclareLaunchArgument(
+        'use_sim_time',
+        default_value='false',
+        description='Use simulation clock if true'
+    )
+    
     drone_id = LaunchConfiguration('drone_id')
+    use_sim_time = LaunchConfiguration('use_sim_time')
 
     # 2. Architect the Node Bringup Sequence
-    # This enforces that all nodes share the exact same drone_id namespace
-    
     vision_nav_node = Node(
         package='navigation_brain',
         executable='vision_nav_node',
         name='vision_nav',
-        parameters=[{'drone_id': drone_id}],
+        parameters=[{'drone_id': drone_id, 'use_sim_time': use_sim_time}],
         output='screen'
     )
     
     landing_state_node = Node(
         package='navigation_brain',
-        executable='landing_state_node', # Shivam's future executable
+        executable='landing_state_node',
         name='landing_state',
-        parameters=[{'drone_id': drone_id}],
+        parameters=[{'drone_id': drone_id, 'use_sim_time': use_sim_time}],
         output='screen'
     )
 
@@ -547,17 +792,287 @@ def generate_launch_description():
         package='navigation_brain',
         executable='state_machine_node',
         name='master_state_machine',
-        parameters=[{'drone_id': drone_id}],
+        parameters=[{'drone_id': drone_id, 'use_sim_time': use_sim_time}],
+        output='screen'
+    )
+
+    anti_sway_node = Node(
+        package='navigation_brain',
+        executable='anti_sway_filter',
+        name='anti_sway',
+        parameters=[{'drone_id': drone_id, 'use_sim_time': use_sim_time}],
         output='screen'
     )
 
     # 3. Execute the Swarm
     return LaunchDescription([
         drone_id_arg,
+        use_sim_time_arg,
         vision_nav_node,
         landing_state_node,
-        state_machine_node
+        state_machine_node,
+        anti_sway_node
     ])
+</file>
+
+<file path="src/drone_description/launch/display.launch.py">
+import os
+from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
+from launch.substitutions import Command
+from launch_ros.actions import Node
+
+def generate_launch_description():
+    pkg_share = get_package_share_directory('drone_description')
+    xacro_file = os.path.join(pkg_share, 'urdf', 'drone.urdf.xacro')
+
+    robot_description_content = Command(['xacro ', xacro_file])
+    robot_description = {'robot_description': robot_description_content}
+
+    robot_state_publisher_node = Node(
+        package='robot_state_publisher',
+        executable='robot_state_publisher',
+        output='screen',
+        parameters=[robot_description]
+    )
+
+    # Headless publisher to satisfy the transform tree requirements
+    joint_state_publisher_node = Node(
+        package='joint_state_publisher',
+        executable='joint_state_publisher'
+    )
+
+    # The WebSocket bridge to your iMac
+    foxglove_bridge_node = Node(
+        package='foxglove_bridge',
+        executable='foxglove_bridge',
+        parameters=[{
+            'port': 8765,
+            'address': '0.0.0.0',
+            'tls': False
+        }]
+    )
+
+    return LaunchDescription([
+        robot_state_publisher_node,
+        joint_state_publisher_node,
+        foxglove_bridge_node
+    ])
+</file>
+
+<file path="src/drone_description/urdf/drone.urdf.xacro">
+<?xml version="1.0"?>
+<robot name="swarm_drone" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <link name="base_link">
+    <inertial>
+      <mass value="1.5"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.02" ixy="0.0" ixz="0.0" iyy="0.02" iyz="0.0" izz="0.04"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <box size="0.4 0.4 0.1"/>
+      </geometry>
+      <material name="dark_grey"><color rgba="0.2 0.2 0.2 1.0"/></material>
+    </visual>
+    <collision>
+      <geometry><box size="0.4 0.4 0.1"/></geometry>
+    </collision>
+  </link>
+
+  <link name="lidar_link"/>
+  <joint name="lidar_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="lidar_link"/>
+    <origin xyz="0 0 -0.05" rpy="0 0 0"/>
+  </joint>
+
+  <link name="camera_link">
+    <inertial>
+      <mass value="0.05"/> 
+      <origin xyz="0 0 0" rpy="0 0 0"/> 
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+    <visual>
+      <geometry><box size="0.03 0.03 0.03"/></geometry>
+    </visual>
+  </link>
+
+  <joint name="camera_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="camera_link"/>
+    <origin xyz="0 0 -0.05" rpy="0 1.570796 0"/> 
+  </joint>
+
+  <link name="tether_dummy_link">
+    <inertial>
+      <mass value="0.001"/> 
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+    </inertial>
+  </link>
+
+  <joint name="payload_swing_x" type="revolute">
+    <parent link="base_link"/>
+    <child link="tether_dummy_link"/>
+    <origin xyz="0 0 -0.08" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-0.5" upper="0.5" effort="10" velocity="5.0"/>
+    <dynamics damping="0.1" friction="0.0"/>
+  </joint>
+
+  <link name="payload_link">
+    <inertial>
+      <mass value="1.0"/> <origin xyz="0 0 -0.25" rpy="0 0 0"/> 
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 -0.25" rpy="0 0 0"/> 
+      <geometry><box size="0.1 0.1 0.1"/></geometry>
+    </visual>
+  </link>
+
+  <joint name="payload_swing_y" type="revolute">
+    <parent link="tether_dummy_link"/>
+    <child link="payload_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-0.5" upper="0.5" effort="10" velocity="5.0"/>
+    <dynamics damping="0.1" friction="0.0"/>
+  </joint>
+  
+  <xacro:macro name="rotor" params="motor_number x_pos y_pos">
+    <link name="rotor_${motor_number}_link">
+      <inertial>
+        <mass value="0.05"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0002"/>
+      </inertial>
+      <visual>
+        <geometry><cylinder radius="0.1" length="0.01"/></geometry>
+      </visual>
+    </link>
+    <joint name="rotor_${motor_number}_joint" type="continuous">
+      <parent link="base_link"/>
+      <child link="rotor_${motor_number}_link"/>
+      <origin xyz="${x_pos} ${y_pos} 0.06" rpy="0 0 0"/>
+      <axis xyz="0 0 1"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:rotor motor_number="0" x_pos="0.2" y_pos="-0.2"/>  <xacro:rotor motor_number="1" x_pos="-0.2" y_pos="0.2"/>  <xacro:rotor motor_number="2" x_pos="0.2" y_pos="0.2"/>   <xacro:rotor motor_number="3" x_pos="-0.2" y_pos="-0.2"/> <gazebo>
+    <plugin name="ardupilot_plugin" filename="libArduPilotPlugin.so">
+      <fdm_addr>127.0.0.1</fdm_addr>
+      <fdm_port_in>9002</fdm_port_in>
+      <fdm_port_out>9003</fdm_port_out>
+      
+      <modelXYZToAirplaneXForwardZDown>0 0 0 3.141593 0 0</modelXYZToAirplaneXForwardZDown>
+      <gazeboXYZToNED>0 0 0 3.141593 0 0</gazeboXYZToNED>
+      
+      <control channel="0">
+        <type>VELOCITY</type>
+        <offset>0</offset>
+        <p_gain>0.20</p_gain>
+        <i_gain>0</i_gain>
+        <d_gain>0</d_gain>
+        <i_max>0</i_max>
+        <i_min>0</i_min>
+        <cmd_max>2.5</cmd_max>
+        <cmd_min>-2.5</cmd_min>
+        <jointName>rotor_0_joint</jointName>
+        <multiplier>838</multiplier>
+      </control>
+
+      <control channel="1">
+        <type>VELOCITY</type>
+        <offset>0</offset>
+        <p_gain>0.20</p_gain>
+        <i_gain>0</i_gain>
+        <d_gain>0</d_gain>
+        <i_max>0</i_max>
+        <i_min>0</i_min>
+        <cmd_max>2.5</cmd_max>
+        <cmd_min>-2.5</cmd_min>
+        <jointName>rotor_1_joint</jointName>
+        <multiplier>838</multiplier>
+      </control>
+
+      <control channel="2">
+        <type>VELOCITY</type>
+        <offset>0</offset>
+        <p_gain>0.20</p_gain>
+        <i_gain>0</i_gain>
+        <d_gain>0</d_gain>
+        <i_max>0</i_max>
+        <i_min>0</i_min>
+        <cmd_max>2.5</cmd_max>
+        <cmd_min>-2.5</cmd_min>
+        <jointName>rotor_2_joint</jointName>
+        <multiplier>-838</multiplier> </control>
+
+      <control channel="3">
+        <type>VELOCITY</type>
+        <offset>0</offset>
+        <p_gain>0.20</p_gain>
+        <i_gain>0</i_gain>
+        <d_gain>0</d_gain>
+        <i_max>0</i_max>
+        <i_min>0</i_min>
+        <cmd_max>2.5</cmd_max>
+        <cmd_min>-2.5</cmd_min>
+        <jointName>rotor_3_joint</jointName>
+        <multiplier>-838</multiplier> </control>
+    </plugin>
+  </gazebo>
+
+</robot>
+</file>
+
+<file path="src/drone_description/CMakeLists.txt">
+# 1. The absolute requirement. Must be line 1.
+cmake_minimum_required(VERSION 3.8)
+
+# 2. Declare the package name
+project(drone_description)
+
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+# 3. Find the ROS 2 build macros
+find_package(ament_cmake REQUIRED)
+
+# 4. Install your physical assets to the share directory so ROS can find them
+install(DIRECTORY
+  urdf
+  launch
+  DESTINATION share/${PROJECT_NAME}
+)
+
+# 5. This MUST be the absolute last line of the file. It generates local_setup.bash.
+ament_package()
+</file>
+
+<file path="src/drone_description/package.xml">
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>drone_description</name>
+  <version>0.0.0</version>
+  <description>TODO: Package description</description>
+  <maintainer email="root@todo.todo">root</maintainer>
+  <license>TODO: License declaration</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
 </file>
 
 <file path="src/navigation_brain/navigation_brain/__init__.py">
@@ -764,59 +1279,48 @@ setup(
 *.stl binary
 </file>
 
-<file path="docker-compose.yml">
-services:
-  swarm_brain:
-    build: 
-      context: .
-    container_name: swarm_brain_container
-    volumes:
-      - .:/workspace
-    network_mode: host
-    tty: true
-    stdin_open: true
-    profiles:
-      - headless
-    command: /bin/bash -c "source /opt/ros/humble/setup.bash && colcon build && ros2 launch navigation_brain swarm_bringup.launch.py"
+<file path="firmware/ardupilot_config/base_iris.param">
+# base_iris.param
+# -------------------------------------------------------------
+# FRAME CONFIGURATION
+# -------------------------------------------------------------
+FRAME_CLASS     1      # 1 = Quadcopter
+FRAME_TYPE      1      # 1 = X configuration
 
-  swarm_brain_gui:
-    build: 
-      context: .
-    container_name: swarm_brain_gui_container
-    environment:
-      - DISPLAY=host.docker.internal:0
-    volumes:
-      - .:/workspace
-    network_mode: host
-    tty: true
-    stdin_open: true
-    profiles:
-      - dev
-</file>
+# -------------------------------------------------------------
+# BATTERY SIMULATION (CRITICAL FOR ML TRAINING)
+# -------------------------------------------------------------
+BATT_MONITOR    4      # 4 = Analog Voltage and Current
+BATT_CAPACITY   5000   # Battery capacity in mAh (e.g., 5000mAh)
+BATT_VOLT_MAX   25.2   # Max voltage (e.g., 4S LiPo at full charge)
+BATT_VOLT_MIN   21.0   # Min safe voltage before critical failsafe
+BATT_FS_LOW_ACT 1      # 1 = RTL (Return to Launch) on low battery
+BATT_FS_CRT_ACT 2      # 2 = Land on critical battery
 
-<file path="Dockerfile">
-FROM --platform=$TARGETPLATFORM ros:humble-ros-base
-ARG TARGETPLATFORM
-ARG TARGETARCH
+# SITL SPECIFIC BATTERY SIMULATION
+SIM_BATT_VOLTAGE 25.2  # Starting voltage for the simulator
+SIM_BATT_CAP_AH  5.0   # Starting capacity in Amp-Hours
 
-# 1. Install universal dependencies (Works on both Mac and PC)
-RUN apt-get update && apt-get install -y \
-    python3-pip \
-    ros-humble-cv-bridge \
-    ros-humble-message-filters \
-    ros-humble-xacro \
-    ros-humble-robot-state-publisher \
-    && rm -rf /var/lib/apt/lists/*
+# -------------------------------------------------------------
+# HEAVY LIFT & PENDULUM SLUNG LOAD TUNING
+# -------------------------------------------------------------
+# Lower the Attitude Control P-Gains to prevent violent over-correction
+ATC_ANG_PIT_P   3.5    # Default is 4.5. 
+ATC_ANG_RLL_P   3.5    # Default is 4.5.
 
-RUN pip3 install redis numpy control scipy
+# Increase the D-Gains slightly to dampen the oscillation from the payload
+ATC_RAT_PIT_D   0.005
+ATC_RAT_RLL_D   0.005
 
-# 2. Architect-Specific Branching: Only install Gazebo on x86 machines
-RUN if [ "$TARGETARCH" = "amd64" ]; then \
-    apt-get update && apt-get install -y ros-humble-gazebo-ros-pkgs; \
-    fi
+# Motor thrust exponent for larger, heavier propellers (assuming 10-12 inch props)
+MOT_THST_EXPO   0.71
 
-RUN echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
-WORKDIR /workspace
+# Lower the maximum acceleration to prevent the pendulum from whipping
+ATC_ACCEL_P_MAX 80000
+ATC_ACCEL_R_MAX 80000
+
+# Increase the hover throttle learning limit since this rig is heavy
+MOT_HOVER_LEARN 2
 </file>
 
 <file path="src/navigation_brain/setup.py">
@@ -844,7 +1348,8 @@ setup(
         'console_scripts': [
             'vision_nav_node = navigation_brain.vision_nav_node:main',
             'state_machine_node = navigation_brain.state_machine_node:main',
-            'landing_state_node = navigation_brain.landing_state_node:main'
+            'landing_state_node = navigation_brain.landing_state_node:main',
+            'anti_sway_filter = navigation_brain.anti_sway_filter:main',
 
         ],
     },
@@ -872,100 +1377,43 @@ __pycache__/
 *.pyc
 </file>
 
-<file path="README.md">
-1. System Objective & Scope
-The goal of this system is to achieve decentralized, GPS-independent drone navigation and fleet deconfliction within a Gazebo SITL environment.
+<file path="docker-compose.yml">
+services:
+  swarm_brain:
+    build: .
+    container_name: swarm_brain_container
+    ports:
+      - "8765:8765" # Foxglove WebSocket Port
+    volumes:
+      - .:/workspace
+    tty: true
+    stdin_open: true
+    # We remove 'command' so the container boots and stays alive infinitely.
+    # You will manually exec into it to build and launch, preserving your debug environment if a node crashes.
+</file>
 
-Core Constraint: Nodes must be decoupled. Perception and localization do not have direct authority over the motors.
+<file path="Dockerfile">
+# Use the official ROS 2 Humble image (ARM64 compatible)
+FROM ros:humble-ros-base
 
-The Bridge: All state intentions are published to a localized Redis Broker.
+# Install your specific system dependencies PERMANENTLY
+RUN apt-get update && apt-get install -y \
+    python3-pip \
+    ros-humble-cv-bridge \
+    ros-humble-message-filters \
+    ros-humble-xacro \
+    ros-humble-foxglove-bridge \
+    ros-humble-joint-state-publisher \
+    && rm -rf /var/lib/apt/lists/*
 
-The Authority: A Master State Machine evaluates network telemetry, applies safety heuristics, and publishes the final kinematic execution to MAVROS.
+# Install your Python mathematical and network dependencies
+RUN pip3 install redis numpy control scipy
 
+# Automatically source ROS 2 when you enter the container
+RUN echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
 
-2. Team Responsibilities & Node Architecture
-
-A. The Perception Layer (Owner: Raunak)
-Node: vision_nav_node.py
-Role: Calculate X/Y drift velocity using Lucas-Kanade optical flow.
-Strict Constraints: * Must use message_filters.ApproximateTimeSynchronizer to time-sync the camera frames (/camera/image_raw) with the altimeter (/drone/altitude) to accurately perform the pinhole camera conversion ($V_x = \frac{u \cdot Z}{f_x}$).
-Must utilize the queue.Queue(maxsize=5) background thread for Redis I/O.
-Forbidden: Subscribing to or publishing to /mavros/setpoint_velocity/cmd_vel.
-
-B. The Altitude & Landing Layer (Owner: Shivam)
-Node: landing_state_node.py
-Role: Calculate the Z-axis velocity required to hold altitude or execute a precision landing.
-Strict Constraints:
-Must read from the altimeter and output a proportional $V_z$ command.
-Must clamp maximum ascent/descent speeds to prevent simulation physics instability.
-Forbidden: Publishing directly to MAVROS. Output must go strictly to the designated Redis stream.
-
-C. The Machine Learning Data Pipeline (Owners: Bhavya & Priya)
-
-Script: telemetry_logger.py
-Role: Ingest simulation state data to build the dataset for the non-linear battery degradation routing model.
-Strict Constraints:
-Do not interface with ROS 2 DDS.
-Subscribe directly to the Redis telemetry:*:velocity streams and log outputs to normalized CSVs at 10Hz.
-
-D. The Simulation Environment (Owner: Aditya)
-
-Platform: Blender to Gazebo Classic.
-Strict Constraints:
-Scale: 1 Blender Unit = 1 Real-World Meter.
-Performance: Low-poly meshes only. All transforms must be applied (Origin at 0,0,0 geometric base).
-Format: Export strictly as .dae (Collada) with high-contrast ground textures for optical flow validation.
-
-E. The Master State Machine & Overwatch (Owner: Lead Architect)
-
-Node: state_machine_node.py
-Role: The absolute brain of the drone. Ingests all Redis streams, calculates staleness, handles decentralized swarm collision overrides, and executes motor commands.
-
-3. The Data Contract (Stream & Topic Registry)
-This is the immutable data structure of the system. Any deviation in naming conventions or JSON payloads will result in immediate node failure.
-
-ROS 2 Subscriptions (Input Layer)
-| Topic Name | Type | Consumer | Purpose |
-| :--- | :--- | :--- | :--- |
-| `/camera/image_raw` | `sensor_msgs/Image` | Perception | Raw visual feed. |
-| `/drone/altitude` | `std_msgs/Float32` | Perception, Landing | Metric altitude (Z). |
-
-
-
-Redis Broker Streams (The Decoupled Network)
-1. X/Y Vision Telemetry
-Stream Key: telemetry:<drone_id>:velocity        
-JSON Schema:{
-  "timestamp": "float (UNIX epoch)",
-  "drone_id": "string",
-  "linear_x": "float",
-  "linear_y": "float",
-  "linear_z": "0.0",
-  "angular_z": "0.0"
-}
-
-2. Z-Axis Landing Telemetry
-
-Stream Key: telemetry:<drone_id>:altitude_cmd
-JSON Schema: Identical to above, utilized exclusively for linear_z instructions.
-
-3. Global Swarm Override
-Stream Key: emergency_override:<drone_id>
-JSON Schema: Identical to above. Dictated by the off-board distributed engine.
-ROS 2 Publishers (Execution Layer)
-
-| Topic Name | Type | Producer | Purpose |
-| :--- | :--- | :--- | :--- |
-| `/mavros/setpoint_velocity/cmd_vel` | `geometry_msgs/TwistStamped` | State Machine | Final unarguable flight controller input. |
-
-4. Failsafes & Execution Priorities
-The state_machine_node.py operates at 20Hz and adheres to the following strict priority hierarchy.
-
-Priority 1: Swarm Override. If a valid, non-stale vector exists in emergency_override:<drone_id>, execute it immediately and ignore all local perception.
-
-Priority 2: Local Perception Integration. Pull the latest X/Y vector from telemetry:<drone_id>:velocity and the Z vector from telemetry:<drone_id>:altitude_cmd. Merge them into a single TwistStamped message.
-
-Priority 3: The Staleness Failsafe. The state machine compares the payload timestamp against the system clock. If the delta exceeds 0.5 seconds, the data is stale. The drone drops the command and defaults to a zero-velocity hover to prevent uncontrolled drift.
+# Set the working directory
+WORKDIR /workspace
 </file>
 
 <file path="src/navigation_brain/navigation_brain/landing_state_node.py">
@@ -1175,15 +1623,147 @@ $RECYCLE.BIN/
 *.csv
 </file>
 
+<file path="README.md">
+1. System Objective & Scope
+The goal of this system is to achieve decentralized, GPS-independent drone navigation and fleet deconfliction within a Gazebo SITL environment.
+
+Core Constraint: Nodes must be decoupled. Perception and localization do not have direct authority over the motors.
+
+The Bridge: All state intentions are published to a localized Redis Broker.
+
+The Authority: A Master State Machine evaluates network telemetry, applies safety heuristics, and publishes the final kinematic execution to MAVROS.
+
+
+2. Team Responsibilities & Node Architecture
+
+A. The Perception Layer (Owner: Raunak)
+Node: vision_nav_node.py
+Role: Calculate X/Y drift velocity using Lucas-Kanade optical flow.
+Strict Constraints: * Must use message_filters.ApproximateTimeSynchronizer to time-sync the camera frames (/camera/image_raw) with the altimeter (/drone/altitude) to accurately perform the pinhole camera conversion ($V_x = \frac{u \cdot Z}{f_x}$).
+Must utilize the queue.Queue(maxsize=5) background thread for Redis I/O.
+
+NEW TASK/DIRECTIVE
+
+Must extract timestamps from the ROS 2 headers to calculate the precise time delta ($\Delta t$) between frames. Velocity calculations must rigidly follow $V_x = \frac{u \cdot Z}{f_x \cdot \Delta t}$. Calculating raw displacement per frame is strictly forbidden.
+
+Forbidden: Subscribing to or publishing to /mavros/setpoint_velocity/cmd_vel.
+
+B. The Altitude & Landing Layer (Owner: Shivam)
+Node: landing_state_node.py
+Role: Calculate the Z-axis velocity required to hold altitude or execute a precision landing.
+Strict Constraints:
+Must read from the altimeter and output a proportional $V_z$ command.
+Must clamp maximum ascent/descent speeds to prevent simulation physics instability.
+
+NEW TASK/DIRECTIVE
+
+Must implement an explicit max_ascent_speed (e.g., 1.5 m/s) to clamp the P-controller's upward velocity. Uncapped positive Z-axis commands will destabilize the simulation physics.
+
+Forbidden: Publishing directly to MAVROS. Output must go strictly to the designated Redis stream.
+
+C. The Machine Learning Data Pipeline (Owners: Bhavya & Priya)
+
+Script: telemetry_logger.py
+Role: Ingest simulation state data to build the dataset for the non-linear battery degradation routing model.
+Strict Constraints:
+Do not interface with ROS 2 DDS.
+Subscribe directly to the Redis telemetry:*:velocity streams and log outputs to normalized CSVs at 10Hz.
+
+D. The Simulation Environment (Owner: Aditya)
+
+Platform: Blender to Gazebo Classic.
+Strict Constraints:
+Scale: 1 Blender Unit = 1 Real-World Meter.
+Performance: Low-poly meshes only. All transforms must be applied (Origin at 0,0,0 geometric base).
+Format: Export strictly as .dae (Collada) with high-contrast ground textures for optical flow validation.
+
+E. The Master State Machine & Overwatch (Owner: Lead Architect)
+
+Node: state_machine_node.py
+Role: The absolute brain of the drone. Ingests all Redis streams, calculates staleness, handles decentralized swarm collision overrides, and executes motor commands.
+
+NEW TASK/DIRECTIVE
+
+Node: state_machine_node.py
+
+Strict Constraints:
+
+Asynchronous I/O: The 20Hz control loop must be entirely non-blocking. Redis polling (xrevrange) must be offloaded to a background threading.Thread that updates a local, thread-safe state dictionary.
+
+The MAVROS Handshake: Must publish 0.0 m/s velocities for 2 seconds, explicitly call the /mavros/set_mode service to request OFFBOARD mode, and wait for confirmation before calling the arming service.
+
+F. The Simulation Orchestration (The Spine) (Owner: Lead Architect)
+
+   File: sitl_bringup.launch.py (inside drone_description/launch/)
+
+Role: The master orchestrator that bridges the ROS 2 software stack with the Gazebo physics engine.
+
+Strict Sequence:
+
+Initialize robot_state_publisher to broadcast the URDF TF tree.
+
+Launch the Gazebo server and client.
+
+Execute spawn_entity.py to inject the drone into the simulation.
+
+Trigger swarm_bringup.launch.py only after physics are confirmed running.
+
+3. The Data Contract (Stream & Topic Registry)
+This is the immutable data structure of the system. Any deviation in naming conventions or JSON payloads will result in immediate node failure.
+
+ROS 2 Subscriptions (Input Layer)
+| Topic Name | Type | Consumer | Purpose |
+| :--- | :--- | :--- | :--- |
+| `/camera/image_raw` | `sensor_msgs/Image` | Perception | Raw visual feed. |
+| `/drone/altitude` | `std_msgs/Float32` | Perception, Landing | Metric altitude (Z). |
+
+
+
+Redis Broker Streams (The Decoupled Network)
+1. X/Y Vision Telemetry
+Stream Key: telemetry:<drone_id>:velocity        
+JSON Schema:{
+  "timestamp": "float (UNIX epoch)",
+  "drone_id": "string",
+  "linear_x": "float",
+  "linear_y": "float",
+  "linear_z": "0.0",
+  "angular_z": "0.0"
+}
+
+2. Z-Axis Landing Telemetry
+
+Stream Key: telemetry:<drone_id>:altitude_cmd
+JSON Schema: Identical to above, utilized exclusively for linear_z instructions.
+
+3. Global Swarm Override
+Stream Key: emergency_override:<drone_id>
+JSON Schema: Identical to above. Dictated by the off-board distributed engine.
+ROS 2 Publishers (Execution Layer)
+
+| Topic Name | Type | Producer | Purpose |
+| :--- | :--- | :--- | :--- |
+| `/mavros/setpoint_velocity/cmd_vel` | `geometry_msgs/TwistStamped` | State Machine | Final unarguable flight controller input. |
+
+4. Failsafes & Execution Priorities
+The state_machine_node.py operates at 20Hz and adheres to the following strict priority hierarchy.
+
+Priority 1: Swarm Override. If a valid, non-stale vector exists in emergency_override:<drone_id>, execute it immediately and ignore all local perception.
+
+Priority 2: Local Perception Integration. Pull the latest X/Y vector from telemetry:<drone_id>:velocity and the Z vector from telemetry:<drone_id>:altitude_cmd. Merge them into a single TwistStamped message.
+
+Priority 3: The Staleness Failsafe. The state machine compares the payload timestamp against the system clock. If the delta exceeds 0.3 seconds (adjusted for 15Hz camera processing limits), the data is stale. The drone drops the command and defaults to a zero-velocity hover.
+</file>
+
 <file path="src/navigation_brain/navigation_brain/state_machine_node.py">
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import TwistStamped
 from mavros_msgs.msg import RCIn
-from mavros_msgs.srv import CommandBool
+from mavros_msgs.srv import CommandBool, SetMode
 from rclpy.qos import qos_profile_sensor_data
-import redis
+from swarm_utils.redis_bridge import RedisTelemetrySubscriber
 
 class StateMachineNode(Node):
     def __init__(self):
@@ -1192,104 +1772,165 @@ class StateMachineNode(Node):
         self.declare_parameter('drone_id', 'drone_00')
         self.drone_id = self.get_parameter('drone_id').get_parameter_value().string_value
 
-        try:
-            self.redis_client = redis.Redis(host='localhost', port=6379, decode_responses=True)
-            self.redis_client.ping()
-            self.telemetry_stream = f'telemetry:{self.drone_id}:velocity'
-            self.altitude_stream = f'telemetry:{self.drone_id}:altitude_cmd'
-            self.override_stream = f'emergency_override:{self.drone_id}'
-        except redis.ConnectionError as e:
-            self.get_logger().error(f'FATAL: Redis connection failed on boot: {e}')
-            raise SystemExit
-        
-        self.get_logger().info(f'Initializing Master State Machine for {self.drone_id}...')
+        self.telemetry_stream = f'telemetry:{self.drone_id}:velocity'
+        self.altitude_stream = f'telemetry:{self.drone_id}:altitude_cmd'
+        self.override_stream = f'emergency_override:{self.drone_id}'
 
-        self.velocity_publisher = self.create_publisher(
-            TwistStamped,
-            '/mavros/setpoint_velocity/cmd_vel',
-            10
+        # Initialize the decoupled background network thread
+        self.redis_sub = RedisTelemetrySubscriber(
+            streams=[self.telemetry_stream, self.altitude_stream, self.override_stream],
+            logger=self.get_logger()
         )
 
-        self.arming_client = self.create_client(CommandBool, '/mavros/cmd/arming')
-        self.is_armed = True 
+        # Execution Publishers
+        self.velocity_publisher = self.create_publisher(
+            TwistStamped, '/mavros/setpoint_velocity/cmd_vel', 10
+        )
 
-        # HARDWARE INTERRUPT
+        # MAVROS Service Clients
+        self.arming_client = self.create_client(CommandBool, '/mavros/cmd/arming')
+        self.set_mode_client = self.create_client(SetMode, '/mavros/set_mode')
+        
         self.rc_sub = self.create_subscription(
             RCIn, '/mavros/rc/in', self.rc_callback, qos_profile_sensor_data 
         )
 
-        self.control_timer = self.create_timer(0.05, self.control_loop) # 20Hz
-        
-        # FIX 2: Tightened latency tolerance for reality
-        self.max_data_age = 0.1 
+        # State Variables
+        self.flight_state = 'BOOTING'
+        self.boot_start_time = self.get_clock().now().nanoseconds / 1e9
+        self.max_data_age = 0.3  # Adjusted for 15Hz physical reality
+
+        self.get_logger().info(f'Master State Machine booting for {self.drone_id}...')
+        self.control_timer = self.create_timer(0.05, self.control_loop) # Strict 20Hz
 
     def rc_callback(self, msg):
+        """ Hardware interrupt for safety kills. Absolute authority. """
         if len(msg.channels) > 7:
-            ch8_pwm = msg.channels[7]
-            if ch8_pwm > 1500 and self.is_armed:
+            if msg.channels[7] > 1500:
                 self.get_logger().fatal("HARDWARE KILL SWITCH ACTIVATED! DISARMING!")
                 self.disarm_drone()
 
     def control_loop(self):
-        if not self.is_armed:
-            return 
-        
         cmd_msg = TwistStamped()
         cmd_msg.header.stamp = self.get_clock().now().to_msg()
         cmd_msg.header.frame_id = f'{self.drone_id}_base_link'
         
-        target_vx, target_vy, target_vz, target_wz = 0.0, 0.0, 0.0, 0.0
-        
-        # FIX 3: Mid-flight network resilience
-        try:
-            override_data = self.redis_client.xrevrange(self.override_stream, max='+', min='-', count=1)
-            vision_data = self.redis_client.xrevrange(self.telemetry_stream, max='+', min='-', count=1)
-            altitude_data = self.redis_client.xrevrange(self.altitude_stream, max='+', min='-', count=1)
-        except redis.ConnectionError as e:
-            self.get_logger().error(f"REDIS CRASH: {e}. Hovering!")
-            self.velocity_publisher.publish(cmd_msg) # Publishes 0.0s
+        # -------------------------------------------------------------
+        # PHASE 1: THE OFFBOARD HANDSHAKE
+        # -------------------------------------------------------------
+        if self.flight_state == 'BOOTING':
+            # MAVROS requires a continuous stream of setpoints before allowing OFFBOARD mode
+            self.velocity_publisher.publish(cmd_msg)
+            
+            elapsed = (self.get_clock().now().nanoseconds / 1e9) - self.boot_start_time
+            if elapsed > 2.0:
+                self.get_logger().info('Setpoint stream established. Requesting OFFBOARD mode.')
+                self.request_offboard_and_arm()
+                self.flight_state = 'AWAITING_AUTHORITY'
             return
 
-        # Priority 1: Global Override dictates everything
-        if override_data and not self.is_stale(override_data[0][1].get('timestamp', 0)):
-            target_vx, target_vy, target_vz, target_wz = self.extract_vectors(override_data[0][1])
-                
-        # Priority 2: Merge Local Vision (X/Y) and Local Altitude (Z)
-        else:
-            # Extract X/Y from Raunak's vision node
-            if vision_data and not self.is_stale(vision_data[0][1].get('timestamp', 0)):
-                payload = vision_data[0][1]
-                
-                # --- THE BLIND STATE CHECK ---
-                # Defaults to 'True' to prevent crashing before Raunak's PR is merged
-                if payload.get('is_valid', 'True') == 'True':
-                    target_vx = float(payload.get('linear_x', 0.0))
-                    target_vy = float(payload.get('linear_y', 0.0))
-                    target_wz = float(payload.get('angular_z', 0.0))
-                else:
-                    self.get_logger().warn("BLIND STATE: Optical flow lost! Zeroing X/Y velocities.")
-                    target_vx, target_vy, target_wz = 0.0, 0.0, 0.0
-                    # Note: We do not touch target_vz here. 
-                    # We let Shivam's altitude node continue to manage the Z-axis descent.
+        if self.flight_state in ['AWAITING_AUTHORITY', 'ARMING_REQUESTED']:
+            self.velocity_publisher.publish(cmd_msg) # Keep the 0.0 stream alive
+            return
             
-            if altitude_data and not self.is_stale(altitude_data[0][1].get('timestamp', 0)):
-                payload = altitude_data[0][1]
-                target_vz = float(payload.get('linear_z', 0.0))
+        if self.flight_state == 'DISARMED':
+            return # Terminal state
+
+        # -------------------------------------------------------------
+        # PHASE 2: ACTIVE FLIGHT (Zero Network Blocking)
+        # -------------------------------------------------------------
+        target_vx, target_vy, target_vz, target_wz = 0.0, 0.0, 0.0, 0.0
+        
+        # Read directly from local RAM (Instantly)
+        override_payload = self.redis_sub.get_latest(self.override_stream)
+        vision_payload = self.redis_sub.get_latest(self.telemetry_stream)
+        altitude_payload = self.redis_sub.get_latest(self.altitude_stream)
+
+        # Priority 1: Global Swarm Override
+        if override_payload and not self.is_stale(override_payload.get('timestamp', 0)):
+            target_vx, target_vy, target_vz, target_wz = self.extract_vectors(override_payload)
                 
-                # FIX 1: API Contract Fulfilled (The Missing Disarm)
-                cut_motors = payload.get('cut_motors', 'False') == 'True'
-                if cut_motors:
+        # Priority 2: Merge Local Perception Vectors
+        else:
+            if vision_payload and not self.is_stale(vision_payload.get('timestamp', 0)):
+                if vision_payload.get('is_valid', 'True') == 'True':
+                    target_vx = float(vision_payload.get('linear_x', 0.0))
+                    target_vy = float(vision_payload.get('linear_y', 0.0))
+                    target_wz = float(vision_payload.get('angular_z', 0.0))
+                else:
+                    self.get_logger().warn("BLIND STATE: Optical flow lost! Zeroing X/Y.")
+            
+            if altitude_payload and not self.is_stale(altitude_payload.get('timestamp', 0)):
+                target_vz = float(altitude_payload.get('linear_z', 0.0))
+                
+                if altitude_payload.get('cut_motors', 'False') == 'True':
                     self.get_logger().warn("Altitude Node requested motor cutoff. Disarming.")
                     self.disarm_drone()
                     return
 
-        # Execute
         cmd_msg.twist.linear.x = target_vx
         cmd_msg.twist.linear.y = target_vy
         cmd_msg.twist.linear.z = target_vz
         cmd_msg.twist.angular.z = target_wz
-
         self.velocity_publisher.publish(cmd_msg)
+
+    def request_offboard_and_arm(self):
+        """ The mandatory sequence to seize control from the physics engine. """
+        if not self.set_mode_client.wait_for_service(timeout_sec=2.0):
+            self.get_logger().error('Set_mode service unavailable. Boot failed.')
+            return
+            
+        mode_req = SetMode.Request()
+        mode_req.custom_mode = 'OFFBOARD'
+        
+        future = self.set_mode_client.call_async(mode_req)
+        future.add_done_callback(self.mode_change_callback)
+
+    def mode_change_callback(self, future):
+        try:
+            response = future.result()
+            if response.mode_sent:
+                self.get_logger().info('OFFBOARD mode engaged. Requesting Motor Arming...')
+                
+                arm_req = CommandBool.Request()
+                arm_req.value = True
+                
+                # Chain the callback. Do NOT declare success yet.
+                arm_future = self.arming_client.call_async(arm_req)
+                arm_future.add_done_callback(self.arming_callback)
+                
+                self.flight_state = 'ARMING_REQUESTED'
+            else:
+                self.get_logger().error('OFFBOARD mode rejected. Retrying handshake.')
+                self.trigger_boot_retry()
+        except Exception as e:
+            self.get_logger().error(f'SetMode service call failed: {e}. Retrying.')
+            self.trigger_boot_retry()
+
+    def arming_callback(self, future):
+        try:
+            response = future.result()
+            if response.success:
+                self.get_logger().info('Motors Armed. Execution Authority Granted. Entering FLYING state.')
+                self.flight_state = 'FLYING'
+            else:
+                self.get_logger().error('Arming rejected (EKF not settled?). Retrying handshake.')
+                self.trigger_boot_retry()
+        except Exception as e:
+            self.get_logger().error(f'Arming service call failed: {e}. Retrying.')
+            self.trigger_boot_retry()
+
+    def trigger_boot_retry(self):
+        """ Forces the state machine to reset the handshake loop. """
+        self.flight_state = 'BOOTING'
+        self.boot_start_time = self.get_clock().now().nanoseconds / 1e9
+
+    def disarm_drone(self):
+        self.flight_state = 'DISARMED'
+        req = CommandBool.Request()
+        req.value = False
+        self.arming_client.call_async(req)
+        self.get_logger().info('Terminal disarm sequence executed.')
 
     def extract_vectors(self, payload):
         return (
@@ -1299,25 +1940,26 @@ class StateMachineNode(Node):
             float(payload.get('angular_z', 0.0))
         )
 
-    def disarm_drone(self):
-        self.is_armed = False
-        if not self.arming_client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().error('MAVROS arming service not available!')
-            return
-            
-        req = CommandBool.Request()
-        req.value = False
-        self.arming_client.call_async(req)
-        self.get_logger().info('Disarm command sent to flight controller.')
-
     def is_stale(self, payload_timestamp_str):
         try:
             current_ros_time = self.get_clock().now().nanoseconds / 1e9
-            if (current_ros_time - float(payload_timestamp_str)) > self.max_data_age:
-                return True
-            return False
-        except ValueError:
+            return (current_ros_time - float(payload_timestamp_str)) > self.max_data_age
+        except (ValueError, TypeError):
             return True
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = StateMachineNode()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        node.get_logger().info("Shutting down...")
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
 </file>
 
 <file path="src/swarm_utils/swarm_utils/redis_bridge.py">
@@ -1382,12 +2024,59 @@ class RedisTelemetryPublisher:
             'angular_z': f"{float(wz):.4f}",
             'cut_motors': str(cut_motors),
             'is_valid': str(is_valid)
-            
         }
+        
+        # This belongs HERE. Not at the bottom of the file.
         try:
             self._queue.put_nowait(payload)
         except queue.Full:
             pass # Drop frame to maintain real-time edge
+
+
+class RedisTelemetrySubscriber:
+    def __init__(self, streams, host='localhost', port=6379, logger=None):
+        self.streams = streams
+        self.logger = logger
+        
+        try:
+            self.client = redis.Redis(host=host, port=port, decode_responses=True)
+            self.client.ping()
+        except redis.RedisError as e:
+            if self.logger:
+                self.logger.error(f"FATAL: Redis connection failed: {e}")
+            raise SystemExit
+
+        # Thread-safe local storage for the 20Hz loop to read instantly
+        self._lock = threading.Lock()
+        self._latest_data = {stream: None for stream in streams}
+
+        # Background worker that polls the indexed message queue at 100Hz
+        self._worker = threading.Thread(target=self._poll_loop, daemon=True)
+        self._worker.start()
+
+    def _poll_loop(self):
+        """ Runs infinitely in the background, hammering Redis for updates. """
+        while True:
+            try:
+                for stream in self.streams:
+                    # Pull only the absolute newest record from the stream
+                    data = self.client.xrevrange(stream, max='+', min='-', count=1)
+                    if data:
+                        # ACQUIRE LOCK: Stop the state machine from reading while we write
+                        with self._lock:
+                            self._latest_data[stream] = data[0][1]
+            except redis.RedisError as e:
+                if self.logger:
+                    self.logger.error(f"Redis read failed: {e}")
+            
+            # Prevent the daemon from maxing out the CPU core
+            time.sleep(0.01)
+
+    def get_latest(self, stream_name):
+        """ Returns the latest payload in sub-millisecond time. No network I/O. """
+        # ACQUIRE LOCK: Stop the background thread from overwriting while we read
+        with self._lock:
+            return self._latest_data.get(stream_name)
 </file>
 
 <file path="src/navigation_brain/navigation_brain/vision_nav_node.py">

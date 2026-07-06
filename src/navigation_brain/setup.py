@@ -22,7 +22,8 @@ setup(
         'console_scripts': [
             'vision_nav_node = navigation_brain.vision_nav_node:main',
             'state_machine_node = navigation_brain.state_machine_node:main',
-            'landing_state_node = navigation_brain.landing_state_node:main'
+            'landing_state_node = navigation_brain.landing_state_node:main',
+            'anti_sway_filter = navigation_brain.anti_sway_filter:main',
 
         ],
     },
