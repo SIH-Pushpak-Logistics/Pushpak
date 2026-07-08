@@ -7,6 +7,14 @@ log/
 core.*
 
 # =========================
+# ML Pipeline & Redis (Local)
+# =========================
+redis.zip
+redis_win/
+dump.rdb
+docs/
+
+# =========================
 # Python
 # =========================
 __pycache__/
@@ -46,3 +54,5 @@ $RECYCLE.BIN/
 *.swp
 *.swo
 *~
+
+*.csv
