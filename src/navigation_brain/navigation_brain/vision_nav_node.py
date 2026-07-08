@@ -23,6 +23,7 @@ class VisionNavigationNode(Node):
         self.bridge = CvBridge()
         self.prev_gray = None
         self.prev_points = None
+        self.prev_timestamp_sec = None
 
         self.fx = 320.0
         self.fy = 320.0
@@ -31,7 +32,7 @@ class VisionNavigationNode(Node):
 
         # --- Redis Setup ---
         self.redis_publisher = RedisTelemetryPublisher(
-            stream_name=f'telemetry:{self.drone_id}:velocity', 
+            stream_name=f'telemetry:{self.drone_id}:raw_vision', 
             logger=self.get_logger()
         )
 
@@ -84,7 +85,8 @@ class VisionNavigationNode(Node):
             cv_image,
             current_altitude,
             gyro_x,
-            gyro_y
+            gyro_y,
+            timestamp_sec
         )
 
         self.redis_publisher.send_velocity_vector(
@@ -102,7 +104,8 @@ class VisionNavigationNode(Node):
         cv_frame,
         current_altitude,
         gyro_x,
-        gyro_y
+        gyro_y,
+        timestamp_sec
     ):
         """
         RAUNAK: Your OpenCV math goes here. 
@@ -114,6 +117,17 @@ class VisionNavigationNode(Node):
             cv_frame,
             cv2.COLOR_BGR2GRAY
         )
+
+        if self.prev_timestamp_sec is None:
+            self.prev_timestamp_sec = timestamp_sec
+            return False, 0.0, 0.0
+        
+        dt = timestamp_sec - self.prev_timestamp_sec
+
+        if dt <= 0:
+            self.prev_timestamp_sec = timestamp_sec
+            return False, 0.0, 0.0
+        
         if self.prev_gray is None:
             
             self.prev_gray = gray
@@ -172,14 +186,15 @@ class VisionNavigationNode(Node):
         u_translation = u_raw - (gyro_y * self.fx)
         v_translation = v_raw - (gyro_x * self.fy)
 
-        vx = (u_translation * current_altitude) / self.fx
-        vy = (v_translation * current_altitude) / self.fy
+        vx = (u_translation * current_altitude) / (self.fx * dt)
+        vy = (v_translation * current_altitude) / (self.fy * dt)
 
         vx_command = -self.kp * vx
         vy_command = -self.kp * vy
 
         self.prev_gray = gray
         self.prev_points = good_new.reshape(-1, 1, 2)
+        self.prev_timestamp_sec = timestamp_sec
 
         return True, vx_command, vy_command
 
