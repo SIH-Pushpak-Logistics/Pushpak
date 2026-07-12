@@ -3,9 +3,7 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32
 from geometry_msgs.msg import Vector3
-from drone_interfaces.msg import OpticalFlow  # FORCED API CONTRACT
-import math
-from swarm_utils.redis_bridge import RedisTelemetryPublisher
+from swarm_utils.redis_bridge import RedisTelemetryPublisher, RedisTelemetrySubscriber
 
 class AntiSwayFilterNode(Node):
     def __init__(self):
@@ -20,15 +18,20 @@ class AntiSwayFilterNode(Node):
         self.declare_parameter('k_theta_dot_y', 0.0)
         self.declare_parameter('k_theta_x', 0.0)
         self.declare_parameter('k_theta_dot_x', 0.0)
+        
+        # Enforcing Velocity Dampers (Full-State Feedback)
+        self.declare_parameter('k_v_x', 0.0)
+        self.declare_parameter('k_v_y', 0.0)
 
         self.k_theta_y = self.get_parameter('k_theta_y').get_parameter_value().double_value
         self.k_theta_dot_y = self.get_parameter('k_theta_dot_y').get_parameter_value().double_value
         self.k_theta_x = self.get_parameter('k_theta_x').get_parameter_value().double_value
         self.k_theta_dot_x = self.get_parameter('k_theta_dot_x').get_parameter_value().double_value
+        
+        self.k_v_x = self.get_parameter('k_v_x').get_parameter_value().double_value
+        self.k_v_y = self.get_parameter('k_v_y').get_parameter_value().double_value
 
         # --- Alpha-Beta Filter State Persistence ---
-        # Alpha controls position tracking (high = trust sensor, low = trust model)
-        # Beta controls velocity tracking (high = fast response to changes, low = smooth)
         self.alpha = 0.4 
         self.beta = 0.05 
         
@@ -37,25 +40,25 @@ class AntiSwayFilterNode(Node):
         self.theta_y_est = 0.0
         self.theta_y_vel_est = 0.0
 
-        # Raw velocities from Raunak's Optical Flow
         self.raw_vx = 0.0 
         self.raw_vy = 0.0
         self.vision_is_valid = False
 
         self.last_theta_time = None
 
-        # --- Network I/O ---
+        # --- Network I/O (Redis Architecture) ---
         self.redis_publisher = RedisTelemetryPublisher(
             stream_name=f'telemetry:{self.drone_id}:velocity',
             logger=self.get_logger()
         )
 
-        # --- Subscriptions ---
-        # 1. Subscribe to the explicit API contract for optical flow
-        self.vision_sub = self.create_subscription(
-            OpticalFlow, '/internal/raw_optical_flow', self.vision_callback, 10
+        self.raw_vision_stream = f'telemetry:{self.drone_id}:raw_optical_flow'
+        self.redis_subscriber = RedisTelemetrySubscriber(
+            streams=[self.raw_vision_stream],
+            logger=self.get_logger()
         )
-        # 2. Subscribe to the secondary camera's payload tracking output
+
+        # --- Subscriptions ---
         self.payload_angle_sub = self.create_subscription(
             Vector3, '/payload/swing_angle', self.angle_callback, 10
         )
@@ -63,18 +66,7 @@ class AntiSwayFilterNode(Node):
         # --- Control Loop ---
         self.control_timer = self.create_timer(0.02, self.lqr_control_loop) # 50Hz
 
-    def vision_callback(self, msg):
-        """ Ingest explicit optical flow velocity and validity state """
-        self.raw_vx = msg.velocity.x
-        self.raw_vy = msg.velocity.y
-        self.vision_is_valid = msg.is_valid 
-
     def angle_callback(self, msg):
-        """ 
-        Ingest theta from the secondary camera and apply Alpha-Beta tracking.
-        msg.x = raw theta_x
-        msg.y = raw theta_y
-        """
         current_time = self.get_clock().now()
         
         if self.last_theta_time is not None:
@@ -101,8 +93,17 @@ class AntiSwayFilterNode(Node):
         self.last_theta_time = current_time
 
     def lqr_control_loop(self):
-        """ Computes the control law u = -Kx using Alpha-Beta estimates """
         current_time_sec = self.get_clock().now().nanoseconds / 1e9
+
+        # Poll Redis for the latest raw perception data
+        vision_payload = self.redis_subscriber.get_latest(self.raw_vision_stream)
+
+        if vision_payload and vision_payload.get('is_valid', 'True') == 'True':
+            self.raw_vx = float(vision_payload.get('linear_x', 0.0))
+            self.raw_vy = float(vision_payload.get('linear_y', 0.0))
+            self.vision_is_valid = True
+        else:
+            self.vision_is_valid = False
 
         if not self.vision_is_valid:
             self.redis_publisher.send_velocity_vector(
@@ -110,10 +111,18 @@ class AntiSwayFilterNode(Node):
             )
             return
 
-        # 1. Compute LQR Control Effort using Alpha-Beta Estimated States
-        # u = -K * x 
-        accel_x_correction = -(self.k_theta_x * self.theta_x_est + self.k_theta_dot_x * self.theta_x_vel_est)
-        accel_y_correction = -(self.k_theta_y * self.theta_y_est + self.k_theta_dot_y * self.theta_y_vel_est)
+        # 1. Compute Full-State LQR Control Effort (u = -K * x)
+        accel_x_correction = -(
+            self.k_theta_x * self.theta_x_est + 
+            self.k_theta_dot_x * self.theta_x_vel_est + 
+            self.k_v_x * self.raw_vx
+        )
+
+        accel_y_correction = -(
+            self.k_theta_y * self.theta_y_est + 
+            self.k_theta_dot_y * self.theta_y_vel_est + 
+            self.k_v_y * self.raw_vy
+        )
 
         # 2. Integrate Acceleration into a Velocity Command
         dt = 0.02

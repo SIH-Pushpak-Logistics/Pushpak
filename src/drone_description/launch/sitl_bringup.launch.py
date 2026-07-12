@@ -1,7 +1,8 @@
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, TimerAction, DeclareLaunchArgument
+from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, RegisterEventHandler
+from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 from launch.substitutions import Command, LaunchConfiguration
@@ -37,7 +38,7 @@ def generate_launch_description():
         PythonLaunchDescriptionSource([os.path.join(gazebo_ros_dir, 'launch', 'gzclient.launch.py')])
     )
 
-    # 4. Inject the Physical Drone Model (Delayed to let Gazebo boot)
+    # 4. Inject the Physical Drone Model
     spawn_entity = Node(
         package='gazebo_ros',
         executable='spawn_entity.py',
@@ -45,10 +46,18 @@ def generate_launch_description():
         output='screen'
     )
 
-    # 5. Boot the Logic Brains (Delayed to let the drone spawn)
+    # 5. Boot the Logic Brains
     swarm_bringup = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([os.path.join(drone_bringup_dir, 'launch', 'swarm_bringup.launch.py')]),
         launch_arguments={'use_sim_time': use_sim_time}.items()
+    )
+
+    # Execute the swarm brains ONLY after the drone model has physically spawned
+    spawn_exit_event = RegisterEventHandler(
+        event_handler=OnProcessExit(
+            target_action=spawn_entity,
+            on_exit=[swarm_bringup]
+        )
     )
 
     return LaunchDescription([
@@ -56,6 +65,6 @@ def generate_launch_description():
         robot_state_publisher,
         gazebo_server,
         gazebo_client,
-        TimerAction(period=3.0, actions=[spawn_entity]),
-        TimerAction(period=6.0, actions=[swarm_bringup])
+        spawn_entity,          # Boot immediately alongside Gazebo
+        spawn_exit_event       # Waits for spawn_entity to finish before firing brains
     ])
