@@ -36,6 +36,7 @@ class AltitudeControlNode(Node):
         self.target_altitude = 0.0  
         self.kp_z = 0.8             
         self.max_descent_speed = -1.5 
+        self.max_ascent_speed = 1.5
         self.sensor_timeout = 0.5 # seconds
 
         # --- Blind State Failsafe Variables ---
@@ -119,7 +120,11 @@ class AltitudeControlNode(Node):
         else:
             error = self.target_altitude - self.current_z
             vz = self.kp_z * error
-            if vz < self.max_descent_speed:
+            
+            # Rigidly enforce the physical velocity envelope
+            if vz > self.max_ascent_speed:
+                vz = self.max_ascent_speed
+            elif vz < self.max_descent_speed:
                 vz = self.max_descent_speed
 
         # 7. Push to Network
