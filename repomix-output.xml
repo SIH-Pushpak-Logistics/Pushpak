@@ -104,8 +104,10 @@ docker-compose.yml
 Dockerfile
 dumpcore.sh_arducopter.11717.out
 dumpcore.sh_arducopter.13330.out
+dumpcore.sh_arducopter.14092.out
 dumpstack.sh_arducopter.11717.out
 dumpstack.sh_arducopter.13330.out
+dumpstack.sh_arducopter.14092.out
 eeprom.bin
 mav.tlog
 mav.tlog.raw
@@ -114,6 +116,27 @@ README.md
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path="firmware/ardupilot_config/drone_01.param">
+# drone_01.param
+# System ID (CRITICAL: MUST BE UNIQUE)
+SYSID_THISMAV   1
+
+# MAVLink configuration for local routing
+# Defines where this specific drone outputs its telemetry to MAVROS
+SERIAL0_BAUD    115
+SERIAL0_PROTOCOL 2
+</file>
+
+<file path="firmware/ardupilot_config/drone_02.param">
+# drone_02.param
+# System ID (CRITICAL: MUST BE UNIQUE)
+SYSID_THISMAV   2
+
+# MAVLink configuration for local routing
+SERIAL0_BAUD    115
+SERIAL0_PROTOCOL 2
+</file>
 
 <file path="src/drone_bringup/config/apm_config.yaml">
 mavros:
@@ -209,54 +232,6 @@ ament_package()
 </package>
 </file>
 
-<file path="src/navigation_brain/setup.cfg">
-[develop]
-script_dir=$base/lib/navigation_brain
-[install]
-install_scripts=$base/lib/navigation_brain
-</file>
-
-<file path="dumpcore.sh_arducopter.11717.out">
-sh: 0: cannot open dumpcore.sh: No such file
-</file>
-
-<file path="dumpcore.sh_arducopter.13330.out">
-sh: 0: cannot open dumpcore.sh: No such file
-</file>
-
-<file path="dumpstack.sh_arducopter.11717.out">
-sh: 0: cannot open dumpstack.sh: No such file
-</file>
-
-<file path="dumpstack.sh_arducopter.13330.out">
-sh: 0: cannot open dumpstack.sh: No such file
-</file>
-
-<file path="mav.tlog">
-
-</file>
-
-<file path="firmware/ardupilot_config/drone_01.param">
-# drone_01.param
-# System ID (CRITICAL: MUST BE UNIQUE)
-SYSID_THISMAV   1
-
-# MAVLink configuration for local routing
-# Defines where this specific drone outputs its telemetry to MAVROS
-SERIAL0_BAUD    115
-SERIAL0_PROTOCOL 2
-</file>
-
-<file path="firmware/ardupilot_config/drone_02.param">
-# drone_02.param
-# System ID (CRITICAL: MUST BE UNIQUE)
-SYSID_THISMAV   2
-
-# MAVLink configuration for local routing
-SERIAL0_BAUD    115
-SERIAL0_PROTOCOL 2
-</file>
-
 <file path="src/drone_description/launch/display.launch.py">
 import os
 from ament_index_python.packages import get_package_share_directory
@@ -325,29 +300,6 @@ install(DIRECTORY
 
 # 5. This MUST be the absolute last line of the file. It generates local_setup.bash.
 ament_package()
-</file>
-
-<file path="src/drone_description/package.xml">
-<?xml version="1.0"?>
-<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
-<package format="3">
-  <name>drone_description</name>
-  <version>0.0.0</version>
-  <description>TODO: Package description</description>
-  <maintainer email="root@todo.todo">root</maintainer>
-  <license>TODO: License declaration</license>
-
-  <buildtool_depend>ament_cmake</buildtool_depend>
-
-  <exec_depend>foxglove_bridge</exec_depend>
-
-  <test_depend>ament_lint_auto</test_depend>
-  <test_depend>ament_lint_common</test_depend>
-
-  <export>
-    <build_type>ament_cmake</build_type>
-  </export>
-</package>
 </file>
 
 <file path="src/drone_interfaces/msg/OpticalFlow.msg">
@@ -498,6 +450,13 @@ if __name__ == '__main__':
     calculate_lqr_gains()
 </file>
 
+<file path="src/navigation_brain/setup.cfg">
+[develop]
+script_dir=$base/lib/navigation_brain
+[install]
+install_scripts=$base/lib/navigation_brain
+</file>
+
 <file path="src/swarm_utils/resource/swarm_utils">
 
 </file>
@@ -588,66 +547,11 @@ def test_pep257():
     assert rc == 0, 'Found code style errors / warnings'
 </file>
 
-<file path="src/swarm_utils/package.xml">
-<?xml version="1.0"?>
-<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
-<package format="3">
-  <name>swarm_utils</name>
-  <version>0.0.0</version>
-  <description>TODO: Package description</description>
-  <maintainer email="root@todo.todo">root</maintainer>
-  <license>TODO: License declaration</license>
-
-  <exec_depend>python3-redis</exec_depend>
-
-  <test_depend>ament_copyright</test_depend>
-  <test_depend>ament_flake8</test_depend>
-  <test_depend>ament_pep257</test_depend>
-  <test_depend>python3-pytest</test_depend>
-
-  <export>
-    <build_type>ament_python</build_type>
-  </export>
-</package>
-</file>
-
 <file path="src/swarm_utils/setup.cfg">
 [develop]
 script_dir=$base/lib/swarm_utils
 [install]
 install_scripts=$base/lib/swarm_utils
-</file>
-
-<file path="src/swarm_utils/setup.py">
-from setuptools import find_packages, setup
-
-package_name = 'swarm_utils'
-
-setup(
-    name=package_name,
-    version='0.0.0',
-    packages=find_packages(exclude=['test']),
-    data_files=[
-        ('share/ament_index/resource_index/packages',
-            ['resource/' + package_name]),
-        ('share/' + package_name, ['package.xml']),
-    ],
-    install_requires=['setuptools', 'redis'],
-    zip_safe=True,
-    maintainer='root',
-    maintainer_email='root@todo.todo',
-    description='TODO: Package description',
-    license='TODO: License declaration',
-    extras_require={
-        'test': [
-            'pytest',
-        ],
-    },
-    entry_points={
-        'console_scripts': [
-        ],
-    },
-)
 </file>
 
 <file path=".gitattributes">
@@ -668,57 +572,32 @@ setup(
 *.stl binary
 </file>
 
-<file path="firmware/ardupilot_config/base_iris.param">
-# base_iris.param
-# -------------------------------------------------------------
-# FRAME CONFIGURATION
-# -------------------------------------------------------------
-FRAME_CLASS     1      # 1 = Quadcopter
-FRAME_TYPE      1      # 1 = X configuration
+<file path="dumpcore.sh_arducopter.11717.out">
+sh: 0: cannot open dumpcore.sh: No such file
+</file>
 
-# -------------------------------------------------------------
-# BATTERY SIMULATION (CRITICAL FOR ML TRAINING)
-# -------------------------------------------------------------
-BATT_MONITOR    4      # 4 = Analog Voltage and Current
-BATT_CAPACITY   5000   # Battery capacity in mAh (e.g., 5000mAh)
-BATT_VOLT_MAX   25.2   # Max voltage (e.g., 4S LiPo at full charge)
-BATT_VOLT_MIN   21.0   # Min safe voltage before critical failsafe
-BATT_FS_LOW_ACT 1      # 1 = RTL (Return to Launch) on low battery
-BATT_FS_CRT_ACT 2      # 2 = Land on critical battery
+<file path="dumpcore.sh_arducopter.13330.out">
+sh: 0: cannot open dumpcore.sh: No such file
+</file>
 
-# SITL SPECIFIC BATTERY SIMULATION
-SIM_BATT_VOLTAGE 25.2  # Starting voltage for the simulator
-SIM_BATT_CAP_AH  5.0   # Starting capacity in Amp-Hours
+<file path="dumpcore.sh_arducopter.14092.out">
+sh: 0: cannot open dumpcore.sh: No such file
+</file>
 
-# -------------------------------------------------------------
-# HEAVY LIFT & PENDULUM SLUNG LOAD TUNING
-# -------------------------------------------------------------
-# Lower the Attitude Control P-Gains to prevent violent over-correction
-ATC_ANG_PIT_P   3.5    # Default is 4.5. 
-ATC_ANG_RLL_P   3.5    # Default is 4.5.
+<file path="dumpstack.sh_arducopter.11717.out">
+sh: 0: cannot open dumpstack.sh: No such file
+</file>
 
-# Increase the D-Gains slightly to dampen the oscillation from the payload
-ATC_RAT_PIT_D   0.005
-ATC_RAT_RLL_D   0.005
+<file path="dumpstack.sh_arducopter.13330.out">
+sh: 0: cannot open dumpstack.sh: No such file
+</file>
 
-# Motor thrust exponent for larger, heavier propellers (assuming 10-12 inch props)
-MOT_THST_EXPO   0.71
+<file path="dumpstack.sh_arducopter.14092.out">
+sh: 0: cannot open dumpstack.sh: No such file
+</file>
 
-# Lower the maximum acceleration to prevent the pendulum from whipping
-ATC_ACCEL_P_MAX 80000
-ATC_ACCEL_R_MAX 80000
+<file path="mav.tlog">
 
-# Increase the hover throttle learning limit since this rig is heavy
-MOT_HOVER_LEARN 2
-
-# -------------------------------------------------------------
-# VISION NAVIGATION / EKF3 OVERRIDES
-# -------------------------------------------------------------
-AHRS_EKF_TYPE 3        # Force EKF3 to be the primary estimator
-EK3_SRC1_POSXY 0       # Disable GPS for XY position
-EK3_SRC1_VELXY 6       # 6 = External Vision for XY Velocity
-EK3_SRC1_VELZ 1        # 1 = Barometer/IMU for Z Velocity (fallback)
-VISO_TYPE 1            # 1 = MAVLink Vision Input enabled
 </file>
 
 <file path="ml_pipeline/mock_telemetry_publisher.py">
@@ -937,6 +816,173 @@ def main():
 
 if __name__ == "__main__":
     main()
+</file>
+
+<file path="src/drone_description/package.xml">
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>drone_description</name>
+  <version>0.0.0</version>
+  <description>TODO: Package description</description>
+  <maintainer email="root@todo.todo">root</maintainer>
+  <license>TODO: License declaration</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>foxglove_bridge</exec_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
+</file>
+
+<file path="src/swarm_utils/package.xml">
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>swarm_utils</name>
+  <version>0.0.0</version>
+  <description>TODO: Package description</description>
+  <maintainer email="root@todo.todo">root</maintainer>
+  <license>TODO: License declaration</license>
+
+  <exec_depend>python3-redis</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
+</file>
+
+<file path="src/swarm_utils/setup.py">
+from setuptools import find_packages, setup
+
+package_name = 'swarm_utils'
+
+setup(
+    name=package_name,
+    version='0.0.0',
+    packages=find_packages(exclude=['test']),
+    data_files=[
+        ('share/ament_index/resource_index/packages',
+            ['resource/' + package_name]),
+        ('share/' + package_name, ['package.xml']),
+    ],
+    install_requires=['setuptools', 'redis'],
+    zip_safe=True,
+    maintainer='root',
+    maintainer_email='root@todo.todo',
+    description='TODO: Package description',
+    license='TODO: License declaration',
+    extras_require={
+        'test': [
+            'pytest',
+        ],
+    },
+    entry_points={
+        'console_scripts': [
+        ],
+    },
+)
+</file>
+
+<file path=".repomixignore">
+# Ignore ROS 2 build artifacts and logs
+build/
+install/
+log/
+
+# Ignore heavy 3D mesh files and textures (AI cannot read these)
+*.world
+*.dae
+*.stl
+*.png
+*.jpg
+*.jpeg
+*.mtl
+*.obj
+
+# Ignore standard Python cache
+__pycache__/
+*.pyc
+</file>
+
+<file path="docker-compose.yml">
+services:
+  swarm_brain:
+    build: .
+    container_name: swarm_brain_container
+    ports:
+      - "8765:8765" # Foxglove WebSocket Port
+    volumes:
+      - .:/workspace
+    tty: true
+    stdin_open: true
+    # We remove 'command' so the container boots and stays alive infinitely.
+    # You will manually exec into it to build and launch, preserving your debug environment if a node crashes.
+</file>
+
+<file path="firmware/ardupilot_config/base_iris.param">
+# base_iris.param
+# -------------------------------------------------------------
+# FRAME CONFIGURATION
+# -------------------------------------------------------------
+FRAME_CLASS     1      # 1 = Quadcopter
+FRAME_TYPE      1      # 1 = X configuration
+
+# -------------------------------------------------------------
+# BATTERY SIMULATION (CRITICAL FOR ML TRAINING)
+# -------------------------------------------------------------
+BATT_MONITOR    4      # 4 = Analog Voltage and Current
+BATT_CAPACITY   5000   # Battery capacity in mAh (e.g., 5000mAh)
+BATT_VOLT_MAX   25.2   # Max voltage (e.g., 4S LiPo at full charge)
+BATT_VOLT_MIN   21.0   # Min safe voltage before critical failsafe
+BATT_FS_LOW_ACT 1      # 1 = RTL (Return to Launch) on low battery
+BATT_FS_CRT_ACT 2      # 2 = Land on critical battery
+
+# SITL SPECIFIC BATTERY SIMULATION
+SIM_BATT_VOLTAGE 25.2  # Starting voltage for the simulator
+SIM_BATT_CAP_AH  5.0   # Starting capacity in Amp-Hours
+
+# -------------------------------------------------------------
+# HEAVY LIFT & PENDULUM SLUNG LOAD TUNING
+# -------------------------------------------------------------
+# Lower the Attitude Control P-Gains to prevent violent over-correction
+ATC_ANG_PIT_P   3.5    # Default is 4.5. 
+ATC_ANG_RLL_P   3.5    # Default is 4.5.
+
+# Increase the D-Gains slightly to dampen the oscillation from the payload
+ATC_RAT_PIT_D   0.005
+ATC_RAT_RLL_D   0.005
+
+# Motor thrust exponent for larger, heavier propellers (assuming 10-12 inch props)
+MOT_THST_EXPO   0.71
+
+# Lower the maximum acceleration to prevent the pendulum from whipping
+ATC_ACCEL_P_MAX 80000
+ATC_ACCEL_R_MAX 80000
+
+# Increase the hover throttle learning limit since this rig is heavy
+MOT_HOVER_LEARN 2
+
+# -------------------------------------------------------------
+# VISION NAVIGATION / EKF3 OVERRIDES
+# -------------------------------------------------------------
+AHRS_EKF_TYPE 3        # Force EKF3 to be the primary estimator
+EK3_SRC1_POSXY 0       # Disable GPS for XY position
+EK3_SRC1_VELXY 6       # 6 = External Vision for XY Velocity
+EK3_SRC1_VELZ 1        # 1 = Barometer/IMU for Z Velocity (fallback)
+VISO_TYPE 1            # 1 = MAVLink Vision Input enabled
 </file>
 
 <file path="src/drone_bringup/launch/swarm_bringup.launch.py">
@@ -1488,40 +1534,65 @@ if __name__ == '__main__':
 </package>
 </file>
 
-<file path=".repomixignore">
-# Ignore ROS 2 build artifacts and logs
+<file path=".gitignore">
+# =========================
+# ROS 2 Workspace Artifacts
+# =========================
 build/
 install/
 log/
+core.*
 
-# Ignore heavy 3D mesh files and textures (AI cannot read these)
-*.world
-*.dae
-*.stl
-*.png
-*.jpg
-*.jpeg
-*.mtl
-*.obj
+# =========================
+# ML Pipeline & Redis (Local)
+# =========================
+redis.zip
+redis_win/
+dump.rdb
+docs/
 
-# Ignore standard Python cache
+# =========================
+# Python
+# =========================
 __pycache__/
-*.pyc
-</file>
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.env
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
 
-<file path="docker-compose.yml">
-services:
-  swarm_brain:
-    build: .
-    container_name: swarm_brain_container
-    ports:
-      - "8765:8765" # Foxglove WebSocket Port
-    volumes:
-      - .:/workspace
-    tty: true
-    stdin_open: true
-    # We remove 'command' so the container boots and stays alive infinitely.
-    # You will manually exec into it to build and launch, preserving your debug environment if a node crashes.
+# =========================
+# OS Generated Files
+# =========================
+# Your Mac
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Their Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# =========================
+# IDEs and Editors
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+*.csv
 </file>
 
 <file path="Dockerfile">
@@ -1608,100 +1679,6 @@ RUN echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc \
 
 # Set the final working directory for your host mount
 WORKDIR /workspace
-</file>
-
-<file path="src/navigation_brain/setup.py">
-from setuptools import find_packages, setup
-
-package_name = 'navigation_brain'
-
-setup(
-    name=package_name,
-    version='0.0.1',
-    packages=find_packages(exclude=['test']),
-    data_files=[
-        ('share/ament_index/resource_index/packages',
-            ['resource/' + package_name]),
-        ('share/' + package_name, ['package.xml']),
-    ],
-    install_requires=['setuptools', 'message_filters', 'scipy'],
-    zip_safe=True,
-    maintainer='Architect',
-    maintainer_email='manager@college.ac.in',
-    description='Autonomous vision-based navigation node for SIH drone pipeline',
-    license='Apache-2.0',
-    tests_require=['pytest'],
-    entry_points={
-        'console_scripts': [
-            'vision_nav_node = navigation_brain.vision_nav_node:main',
-            'state_machine_node = navigation_brain.state_machine_node:main',
-            'landing_state_node = navigation_brain.landing_state_node:main',
-            'anti_sway_filter = navigation_brain.anti_sway_filter:main',
-
-        ],
-    },
-)
-</file>
-
-<file path=".gitignore">
-# =========================
-# ROS 2 Workspace Artifacts
-# =========================
-build/
-install/
-log/
-core.*
-
-# =========================
-# ML Pipeline & Redis (Local)
-# =========================
-redis.zip
-redis_win/
-dump.rdb
-docs/
-
-# =========================
-# Python
-# =========================
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
-.env
-.venv/
-pip-log.txt
-pip-delete-this-directory.txt
-
-# =========================
-# OS Generated Files
-# =========================
-# Your Mac
-.DS_Store
-.AppleDouble
-.LSOverride
-._*
-.Spotlight-V100
-.Trashes
-
-# Their Windows
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-$RECYCLE.BIN/
-
-# =========================
-# IDEs and Editors
-# =========================
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-*.csv
 </file>
 
 <file path="README.md">
@@ -1834,6 +1811,39 @@ Priority 1: Swarm Override. If a valid, non-stale vector exists in emergency_ove
 Priority 2: Local Perception Integration. Pull the latest X/Y vector from telemetry:<drone_id>:velocity and the Z vector from telemetry:<drone_id>:altitude_cmd. Merge them into a single TwistStamped message.
 
 Priority 3: The Staleness Failsafe. The state machine compares the payload timestamp against the system clock. If the delta exceeds 0.3 seconds (adjusted for 15Hz camera processing limits), the data is stale. The drone drops the command and defaults to a zero-velocity hover.
+</file>
+
+<file path="src/navigation_brain/setup.py">
+from setuptools import find_packages, setup
+
+package_name = 'navigation_brain'
+
+setup(
+    name=package_name,
+    version='0.0.1',
+    packages=find_packages(exclude=['test']),
+    data_files=[
+        ('share/ament_index/resource_index/packages',
+            ['resource/' + package_name]),
+        ('share/' + package_name, ['package.xml']),
+    ],
+    install_requires=['setuptools', 'message_filters', 'scipy'],
+    zip_safe=True,
+    maintainer='Architect',
+    maintainer_email='manager@college.ac.in',
+    description='Autonomous vision-based navigation node for SIH drone pipeline',
+    license='Apache-2.0',
+    tests_require=['pytest'],
+    entry_points={
+        'console_scripts': [
+            'vision_nav_node = navigation_brain.vision_nav_node:main',
+            'state_machine_node = navigation_brain.state_machine_node:main',
+            'landing_state_node = navigation_brain.landing_state_node:main',
+            'anti_sway_filter = navigation_brain.anti_sway_filter:main',
+
+        ],
+    },
+)
 </file>
 
 <file path="src/navigation_brain/navigation_brain/landing_state_node.py">
