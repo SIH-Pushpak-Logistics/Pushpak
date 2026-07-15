@@ -6,13 +6,13 @@ from std_msgs.msg import Float32
 from cv_bridge import CvBridge, CvBridgeError
 import cv2
 import message_filters
+from rclpy.qos import qos_profile_sensor_data
 from swarm_utils.redis_bridge import RedisTelemetryPublisher
 
 class VisionNavigationNode(Node):
     def __init__(self):
         super().__init__('vision_nav_node')
         
-        # --- Swarm Identity ---
         self.declare_parameter('drone_id', 'drone_00')
         self.drone_id = self.get_parameter('drone_id').get_parameter_value().string_value
         self.get_logger().info(f'Initializing Vision Navigation Node for {self.drone_id}...')
@@ -25,19 +25,15 @@ class VisionNavigationNode(Node):
         self.fx = 320.0
         self.fy = 320.0
 
-        # --- Redis Setup ---
-        # CONTRACT FIXED: Enforcing strict naming convention for the LQR filter
         self.redis_publisher = RedisTelemetryPublisher(
             stream_name=f'telemetry:{self.drone_id}:raw_optical_flow', 
             logger=self.get_logger()
         )
 
-        # --- Synchronized Inputs ---
-        self.camera_sub = message_filters.Subscriber(self, Image, '/camera/image_raw')
-        self.altitude_sub = message_filters.Subscriber(self, Float32, '/drone/altitude')
-        self.imu_sub = message_filters.Subscriber(self, Imu, '/mavros/imu/data')
+        self.camera_sub = message_filters.Subscriber(self, Image, '/camera/image_raw', qos_profile=qos_profile_sensor_data)
+        self.altitude_sub = message_filters.Subscriber(self, Float32, '/drone/altitude', qos_profile=qos_profile_sensor_data)
+        self.imu_sub = message_filters.Subscriber(self, Imu, '/mavros/imu/data', qos_profile=qos_profile_sensor_data)
         
-        # Exact time synchronization (0.05s slop)
         self.ts = message_filters.ApproximateTimeSynchronizer(
             [self.camera_sub, self.altitude_sub, self.imu_sub], 
             queue_size=2, 
@@ -61,39 +57,35 @@ class VisionNavigationNode(Node):
             image_msg.header.stamp.nanosec * 1e-9
         )
 
-        is_valid, vx, vy = self.process_vision_pipeline(
+        is_valid, vx, vy, num_features = self.process_vision_pipeline(
             cv_image, current_altitude, gyro_x, gyro_y, timestamp_sec
         )
 
+        # CONTRACT UPDATE: Passing features to the publisher
         self.redis_publisher.send_velocity_vector(
-            self.drone_id, timestamp_sec, vx, vy, 0.0, 0.0, is_valid=is_valid
+            self.drone_id, timestamp_sec, vx, vy, 0.0, 0.0, is_valid=is_valid, features=num_features
         )
 
     def _reinit_features(self, gray_img):
-        """
-        Consolidates feature tracking initialization to avoid DRY violations.
-        """
         self.prev_gray = gray_img
         self.prev_points = cv2.goodFeaturesToTrack(
             gray_img, maxCorners=100, qualityLevel=0.3, minDistance=7, blockSize=7
         )
-        return False, 0.0, 0.0
+        return False, 0.0, 0.0, 0  # Added 0 for feature count
 
     def process_vision_pipeline(self, cv_frame, current_altitude, gyro_x, gyro_y, timestamp_sec):
         gray = cv2.cvtColor(cv_frame, cv2.COLOR_BGR2GRAY)
 
-        # 1. STATE UPDATE: Handle time unconditionally to prevent dt leaks
         if self.prev_timestamp_sec is None:
             self.prev_timestamp_sec = timestamp_sec
-            return False, 0.0, 0.0
+            return False, 0.0, 0.0, 0
         
         dt = timestamp_sec - self.prev_timestamp_sec
-        self.prev_timestamp_sec = timestamp_sec  # UPDATE IMMEDIATELY
+        self.prev_timestamp_sec = timestamp_sec
 
         if dt <= 0:
-            return False, 0.0, 0.0
+            return False, 0.0, 0.0, 0
         
-        # 2. OPTICAL FLOW EXECUTION
         if self.prev_gray is None:
             return self._reinit_features(gray)
             
@@ -107,31 +99,29 @@ class VisionNavigationNode(Node):
         
         good_new = next_points[status == 1]
         good_old = self.prev_points[status == 1]
+        
+        num_features = len(good_new)
 
-        if len(good_new) == 0:
+        if num_features == 0:
             return self._reinit_features(gray)
         
-        # 3. VELOCITY CALCULATION
         dx = good_new[:, 0] - good_old[:, 0]
         dy = good_new[:, 1] - good_old[:, 1]
 
         u_raw = dx.mean()
         v_raw = dy.mean()
 
-        # Compensate for rotational movement
         u_translation = u_raw - (gyro_y * self.fx)
         v_translation = v_raw - (gyro_x * self.fy)
 
-        # Convert pixel translation to metric velocity
         vx = (u_translation * current_altitude) / (self.fx * dt)
         vy = (v_translation * current_altitude) / (self.fy * dt)
 
-        # 4. STATE PERSISTENCE
         self.prev_gray = gray
         self.prev_points = good_new.reshape(-1, 1, 2)
 
-        # IDENTITY FIXED: Returning pure physical velocity, not a multiplied command
-        return True, vx, vy
+        # Passing the feature count out of the function
+        return True, vx, vy, num_features
 
 def main(args=None):
     rclpy.init(args=args)

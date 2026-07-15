@@ -1,65 +1,26 @@
 import os
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
 
 def generate_launch_description():
-    # 1. Define the system-wide arguments
-    drone_id_arg = DeclareLaunchArgument(
-        'drone_id',
-        default_value='drone_00',
-        description='Unique identifier for the swarm drone'
-    )
-    
-    use_sim_time_arg = DeclareLaunchArgument(
-        'use_sim_time',
-        default_value='false',
-        description='Use simulation clock if true'
-    )
-    
-    drone_id = LaunchConfiguration('drone_id')
-    use_sim_time = LaunchConfiguration('use_sim_time')
+    # 1. Resolve Package Paths
+    drone_bringup_dir = get_package_share_directory('drone_bringup')
+    bridge_config_path = os.path.join(drone_bringup_dir, 'config', 'bridge.yaml')
 
-    # 2. Architect the Node Bringup Sequence
-    vision_nav_node = Node(
-        package='navigation_brain',
-        executable='vision_nav_node',
-        name='vision_nav',
-        parameters=[{'drone_id': drone_id, 'use_sim_time': use_sim_time}],
-        output='screen'
-    )
-    
-    landing_state_node = Node(
-        package='navigation_brain',
-        executable='landing_state_node',
-        name='landing_state',
-        parameters=[{'drone_id': drone_id, 'use_sim_time': use_sim_time}],
+    # 2. The ROS-GZ Bridge Node
+    # This node consumes the bridge.yaml file and translates gz.msgs to sensor_msgs
+    bridge_node = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        parameters=[{
+            'config_file': bridge_config_path,
+            'expand_gz_topic_names': True
+        }],
         output='screen'
     )
 
-    state_machine_node = Node(
-        package='navigation_brain',
-        executable='state_machine_node',
-        name='master_state_machine',
-        parameters=[{'drone_id': drone_id, 'use_sim_time': use_sim_time}],
-        output='screen'
-    )
-
-    anti_sway_node = Node(
-        package='navigation_brain',
-        executable='anti_sway_filter',
-        name='anti_sway',
-        parameters=[{'drone_id': drone_id, 'use_sim_time': use_sim_time}],
-        output='screen'
-    )
-
-    # 3. Execute the Swarm
+    # 3. Build and Return the Execution Graph
     return LaunchDescription([
-        drone_id_arg,
-        use_sim_time_arg,
-        vision_nav_node,
-        landing_state_node,
-        state_machine_node,
-        anti_sway_node
+        bridge_node
     ])
