@@ -45,7 +45,8 @@ class RedisTelemetryPublisher:
         vz,
         wz,
         cut_motors=False,
-        is_valid=True
+        is_valid=True,
+        features=0
     ):
         """
         Enforces the data contract. Coerces all floats to strict strings.
@@ -58,7 +59,8 @@ class RedisTelemetryPublisher:
             'linear_z': f"{float(vz):.4f}",
             'angular_z': f"{float(wz):.4f}",
             'cut_motors': str(cut_motors),
-            'is_valid': str(is_valid)
+            'is_valid': str(is_valid),
+            'features': str(features)
         }
         
         # This belongs HERE. Not at the bottom of the file.

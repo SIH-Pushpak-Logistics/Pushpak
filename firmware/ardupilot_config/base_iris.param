@@ -39,3 +39,12 @@ ATC_ACCEL_R_MAX 80000
 
 # Increase the hover throttle learning limit since this rig is heavy
 MOT_HOVER_LEARN 2
+
+# -------------------------------------------------------------
+# VISION NAVIGATION / EKF3 OVERRIDES
+# -------------------------------------------------------------
+AHRS_EKF_TYPE 3        # Force EKF3 to be the primary estimator
+EK3_SRC1_POSXY 0       # Disable GPS for XY position
+EK3_SRC1_VELXY 6       # 6 = External Vision for XY Velocity
+EK3_SRC1_VELZ 1        # 1 = Barometer/IMU for Z Velocity (fallback)
+VISO_TYPE 1            # 1 = MAVLink Vision Input enabled

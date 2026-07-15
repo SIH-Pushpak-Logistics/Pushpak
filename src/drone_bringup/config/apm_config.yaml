@@ -1,0 +1,27 @@
+mavros:
+  ros__parameters:
+    system_id: 1
+    component_id: 1
+    target_system_id: 1
+    target_component_id: 1
+
+    # --- Coordinate Frame Enforcement ---
+    setpoint_velocity:
+      use_quaternion: false
+      # MAVLink requires LOCAL_NED for GUIDED velocity commands in ArduPilot
+      mav_frame: "LOCAL_NED"
+
+    vision_speed:
+      # Determines how MAVROS interprets the vision_speed_pub twist message
+      listen_twist: true
+      twist_cov: true
+
+    # --- Bandwidth Throttling ---
+    # Saturation of the UDP link will cause packet drops and EKF starvation
+    stream_rate:
+      raw_sensors: 10     # IMU data
+      ext_status: 2       # System status, battery
+      rc_channels: 2      # RC overrides
+      position: 10        # Local position estimates
+      extra1: 10          # Attitude
+      extra2: 10          # VFR HUD

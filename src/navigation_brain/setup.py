@@ -11,7 +11,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools', 'message_filters', 'scipy'],
     zip_safe=True,
     maintainer='Architect',
     maintainer_email='manager@college.ac.in',
