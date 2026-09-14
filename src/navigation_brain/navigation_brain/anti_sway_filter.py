@@ -98,13 +98,16 @@ class AntiSwayFilterNode(Node):
         if vision_payload and vision_payload.get('is_valid', 'True') == 'True':
             self.raw_vx = float(vision_payload.get('linear_x', 0.0))
             self.raw_vy = float(vision_payload.get('linear_y', 0.0))
+            self.raw_features = int(float(vision_payload.get('features', 0)))
             self.vision_is_valid = True
         else:
+            self.raw_features = 0
             self.vision_is_valid = False
 
         if not self.vision_is_valid:
             self.redis_publisher.send_velocity_vector(
-                self.drone_id, current_time_sec, 0.0, 0.0, 0.0, 0.0, is_valid=False
+                self.drone_id, current_time_sec, 0.0, 0.0, 0.0, 0.0,
+                is_valid=False, features=0
             )
             return
 
@@ -136,9 +139,10 @@ class AntiSwayFilterNode(Node):
             current_time_sec, 
             final_vx, 
             final_vy, 
-            0.0,  
-            0.0, 
-            is_valid=True
+            0.0,
+            0.0,
+            is_valid=True,
+            features=self.raw_features
         )
 
 def main(args=None):

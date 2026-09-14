@@ -1,0 +1,30 @@
+--- /workspace/ArduPilotPlugin.cc.orig	2026-09-09 06:51:47.887044110 +0000
++++ /bridge_ws/ardupilot_gazebo_src/src/ArduPilotPlugin.cc	2026-09-09 07:55:22.810010425 +0000
+@@ -1106,8 +1106,6 @@
+     // it's not possible to get the fully qualified topic name we want
+     if (!this->dataPtr->imuInitialized)
+     {
+-        // Set unconditionally because we're only going to try this once.
+-        this->dataPtr->imuInitialized = true;
+         std::string imuTopicName;
+ 
+         // The model must contain an imu sensor element:
+@@ -1178,12 +1176,18 @@
+         }
+         else
+         {
++            if (_info.simTime < std::chrono::seconds(10))
++            {
++                return;
++            }
++            this->dataPtr->imuInitialized = true;
+             gzerr << "[" << this->dataPtr->modelName << "] "
+                   << "imu_sensor [" << this->dataPtr->imuName
+                   << "] not found, abort ArduPilot plugin." << "\n";
+             return;
+         }
+ 
++        this->dataPtr->imuInitialized = true;
+         this->dataPtr->node.Subscribe(imuTopicName,
+             &gz::sim::systems::ArduPilotPluginPrivate::ImuCb,
+             this->dataPtr.get());

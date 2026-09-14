@@ -2,7 +2,7 @@
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image, Imu
-from std_msgs.msg import Float32
+from geometry_msgs.msg import PointStamped
 from cv_bridge import CvBridge, CvBridgeError
 import cv2
 import message_filters
@@ -22,8 +22,8 @@ class VisionNavigationNode(Node):
         self.prev_points = None
         self.prev_timestamp_sec = None
 
-        self.fx = 320.0
-        self.fy = 320.0
+        self.fx = 160.0
+        self.fy = 160.0
 
         self.redis_publisher = RedisTelemetryPublisher(
             stream_name=f'telemetry:{self.drone_id}:raw_optical_flow', 
@@ -31,13 +31,13 @@ class VisionNavigationNode(Node):
         )
 
         self.camera_sub = message_filters.Subscriber(self, Image, '/camera/image_raw', qos_profile=qos_profile_sensor_data)
-        self.altitude_sub = message_filters.Subscriber(self, Float32, '/drone/altitude', qos_profile=qos_profile_sensor_data)
+        self.altitude_sub = message_filters.Subscriber(self, PointStamped, '/drone/altitude', qos_profile=qos_profile_sensor_data)
         self.imu_sub = message_filters.Subscriber(self, Imu, '/mavros/imu/data', qos_profile=qos_profile_sensor_data)
-        
+
         self.ts = message_filters.ApproximateTimeSynchronizer(
-            [self.camera_sub, self.altitude_sub, self.imu_sub], 
-            queue_size=2, 
-            slop=0.02
+            [self.camera_sub, self.altitude_sub, self.imu_sub],
+            queue_size=30,
+            slop=0.25
         )
         self.ts.registerCallback(self.synchronized_callback)
 
@@ -48,7 +48,7 @@ class VisionNavigationNode(Node):
             self.get_logger().error(f'CvBridge Failure: {str(e)}')
             return
 
-        current_altitude = alt_msg.data
+        current_altitude = alt_msg.point.z
         gyro_x = imu_msg.angular_velocity.x
         gyro_y = imu_msg.angular_velocity.y
 

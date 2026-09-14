@@ -69,6 +69,26 @@ class RedisTelemetryPublisher:
         except queue.Full:
             pass # Drop frame to maintain real-time edge
 
+    def send_payload(self, drone_id, timestamp_sec, **fields):
+        """
+        Generic publish for streams that are not velocity vectors.
+        Same coercion discipline: everything becomes a string.
+        """
+        payload = {
+            'timestamp': str(timestamp_sec),
+            'drone_id': str(drone_id),
+        }
+        for key, value in fields.items():
+            if isinstance(value, float):
+                payload[key] = f"{float(value):.4f}"
+            else:
+                payload[key] = str(value)
+
+        try:
+            self._queue.put_nowait(payload)
+        except queue.Full:
+            pass
+
 
 class RedisTelemetrySubscriber:
     def __init__(self, streams, host='localhost', port=6379, logger=None):
@@ -92,20 +112,30 @@ class RedisTelemetrySubscriber:
         self._worker.start()
 
     def _poll_loop(self):
-        """ Runs infinitely in the background, hammering Redis for updates. """
+        """ Runs infinitely in the background, batching all stream reads
+            into a single socket round-trip per cycle. """
+        pipeline = self.client.pipeline(transaction=False)
+
         while True:
             try:
+                # Queue every xrevrange locally. No network I/O yet.
                 for stream in self.streams:
-                    # Pull only the absolute newest record from the stream
-                    data = self.client.xrevrange(stream, max='+', min='-', count=1)
-                    if data:
-                        # ACQUIRE LOCK: Stop the state machine from reading while we write
-                        with self._lock:
-                            self._latest_data[stream] = data[0][1]
+                    pipeline.xrevrange(stream, max='+', min='-', count=1)
+
+                # One socket round-trip for all streams.
+                results = pipeline.execute()
+
+                # ACQUIRE LOCK once per cycle, not once per stream.
+                with self._lock:
+                    for i, stream in enumerate(self.streams):
+                        if results[i]:
+                            self._latest_data[stream] = results[i][0][1]
+
             except redis.RedisError as e:
                 if self.logger:
                     self.logger.error(f"Redis read failed: {e}")
-            
+                pipeline.reset()
+
             # Prevent the daemon from maxing out the CPU core
             time.sleep(0.01)
 

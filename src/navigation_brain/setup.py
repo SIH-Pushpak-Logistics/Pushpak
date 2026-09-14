@@ -1,3 +1,5 @@
+import os
+from glob import glob
 from setuptools import find_packages, setup
 
 package_name = 'navigation_brain'
@@ -10,6 +12,7 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
     ],
     install_requires=['setuptools', 'message_filters', 'scipy'],
     zip_safe=True,
@@ -24,6 +27,8 @@ setup(
             'state_machine_node = navigation_brain.state_machine_node:main',
             'landing_state_node = navigation_brain.landing_state_node:main',
             'anti_sway_filter = navigation_brain.anti_sway_filter:main',
+            'altimeter_node = navigation_brain.altimeter_node:main',
+            'mission_node = navigation_brain.mission_node:main',
 
         ],
     },

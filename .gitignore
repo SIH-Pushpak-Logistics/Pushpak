@@ -56,3 +56,17 @@ $RECYCLE.BIN/
 *~
 
 *.csv
+
+# --- runtime and crash artifacts ---
+ArduPilotPlugin.cc.orig
+dumpstack.sh_arducopter.*.out
+dumpcore.sh_arducopter.*.out
+*.core
+ap-*.core
+mav.tlog
+mav.tlog.raw
+eeprom.bin
+*.log
+drone_telemetry_dataset.csv
+terrain/
+repomix-output.xml

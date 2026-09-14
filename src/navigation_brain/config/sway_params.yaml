@@ -1,0 +1,12 @@
+anti_sway_filter:
+  ros__parameters:
+    # PLACEHOLDER GAINS - NOT VALIDATED.
+    # Replace with output of scripts/lqr_tuner.py before any flight test.
+    # Chosen small enough to be non-destabilising, large enough that the
+    # filter is no longer a pass-through.
+    k_theta_x: 2.0
+    k_theta_dot_x: 0.5
+    k_theta_y: 2.0
+    k_theta_dot_y: 0.5
+    k_v_x: 0.5
+    k_v_y: 0.5

@@ -21,6 +21,21 @@ def generate_launch_description():
     )
 
     # 3. Build and Return the Execution Graph
-    return LaunchDescription([
-        bridge_node
-    ])
+    sway_params_path = os.path.join(
+        get_package_share_directory('navigation_brain'), 'config', 'sway_params.yaml')
+
+    common = {'use_sim_time': True, 'drone_id': 'drone_00'}
+
+    brain_nodes = [
+        Node(package='navigation_brain', executable=exe, name=exe,
+             output='screen', parameters=[common])
+        for exe in ['altimeter_node', 'mission_node', 'vision_nav_node', 'landing_state_node']
+    ]
+
+    brain_nodes.append(
+        Node(package='navigation_brain', executable='anti_sway_filter',
+             name='anti_sway_filter', output='screen',
+             parameters=[sway_params_path, common])
+    )
+
+    return LaunchDescription([bridge_node] + brain_nodes)
