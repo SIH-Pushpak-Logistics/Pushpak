@@ -68,10 +68,15 @@ class VisionNavigationNode(Node):
 
     def _reinit_features(self, gray_img):
         self.prev_gray = gray_img
-        self.prev_points = cv2.goodFeaturesToTrack(
+        pts = cv2.goodFeaturesToTrack(
             gray_img, maxCorners=100, qualityLevel=0.3, minDistance=7, blockSize=7
         )
-        return False, 0.0, 0.0, 0  # Added 0 for feature count
+        if pts is not None and len(pts) > 0:
+            self.prev_points = pts
+            return False, 0.0, 0.0, len(pts)
+        else:
+            self.prev_points = None
+            return False, 0.0, 0.0, 0
 
     def process_vision_pipeline(self, cv_frame, current_altitude, gyro_x, gyro_y, timestamp_sec):
         gray = cv2.cvtColor(cv_frame, cv2.COLOR_BGR2GRAY)
@@ -86,7 +91,7 @@ class VisionNavigationNode(Node):
         if dt <= 0:
             return False, 0.0, 0.0, 0
         
-        if self.prev_gray is None:
+        if self.prev_gray is None or self.prev_points is None or len(self.prev_points) == 0:
             return self._reinit_features(gray)
             
         next_points, status, error = cv2.calcOpticalFlowPyrLK(
@@ -94,7 +99,7 @@ class VisionNavigationNode(Node):
             winSize=(21, 21), maxLevel=3
         )
         
-        if next_points is None:
+        if next_points is None or status is None:
             return self._reinit_features(gray)
         
         good_new = next_points[status == 1]
@@ -118,9 +123,17 @@ class VisionNavigationNode(Node):
         vy = (v_translation * current_altitude) / (self.fy * dt)
 
         self.prev_gray = gray
-        self.prev_points = good_new.reshape(-1, 1, 2)
+        if num_features < 25:
+            pts = cv2.goodFeaturesToTrack(
+                gray, maxCorners=100, qualityLevel=0.3, minDistance=7, blockSize=7
+            )
+            if pts is not None and len(pts) > 0:
+                self.prev_points = pts
+            else:
+                self.prev_points = good_new.reshape(-1, 1, 2)
+        else:
+            self.prev_points = good_new.reshape(-1, 1, 2)
 
-        # Passing the feature count out of the function
         return True, vx, vy, num_features
 
 def main(args=None):

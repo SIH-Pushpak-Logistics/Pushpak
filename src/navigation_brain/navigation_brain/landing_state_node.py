@@ -28,7 +28,7 @@ class AltitudeControlNode(Node):
 
         # --- Control Variables ---
         self.current_z = None
-        self.target_altitude = 0.0  
+        self.target_altitude = 1.5  
         self.kp_z = 0.8             
         self.max_descent_speed = -0.7
         self.max_ascent_speed = 1.5
@@ -36,6 +36,7 @@ class AltitudeControlNode(Node):
 
         # --- Touchdown State Tracking ---
         self.cut_motors_intent = False 
+        self.has_flown = False
         self.prev_z = None
         self.prev_time = None
         self.touchdown_counter = 0  # Persistence counter for noise rejection
@@ -87,10 +88,13 @@ class AltitudeControlNode(Node):
             )
             return
 
+        if self.current_z > 0.5:
+            self.has_flown = True
+
         error = self.target_altitude - self.current_z
         vz = 0.0
         
-        is_landing = self.target_altitude <= 0.1
+        is_landing = self.target_altitude <= 0.1 and self.has_flown
 
         # --- Terminal Descent Phase ---
         if self.current_z < 0.25 and is_landing:

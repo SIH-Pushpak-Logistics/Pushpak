@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import TwistStamped, TwistWithCovarianceStamped
+from geometry_msgs.msg import TwistStamped, TwistWithCovarianceStamped, PoseStamped
 from mavros_msgs.msg import RCIn, State
-from mavros_msgs.srv import CommandBool, SetMode
+from mavros_msgs.srv import CommandBool, SetMode, CommandTOL
 from rclpy.qos import qos_profile_sensor_data
 from swarm_utils.redis_bridge import RedisTelemetrySubscriber
 import numpy as np
@@ -48,6 +48,7 @@ class StateMachineNode(Node):
         # MAVROS Service Clients
         self.arming_client = self.create_client(CommandBool, '/mavros/cmd/arming')
         self.set_mode_client = self.create_client(SetMode, '/mavros/set_mode')
+        self.takeoff_client = self.create_client(CommandTOL, '/mavros/cmd/takeoff')
         
         self.rc_sub = self.create_subscription(
             RCIn, '/mavros/rc/in', self.rc_callback, qos_profile_sensor_data 
@@ -58,8 +59,13 @@ class StateMachineNode(Node):
         self.state_sub = self.create_subscription(
             State, '/mavros/state', self.mavros_state_callback, 10
         )
+        self.pose_sub = self.create_subscription(
+            PoseStamped, '/mavros/local_position/pose', self.pose_callback, qos_profile_sensor_data
+        )
 
         # State Variables
+        self.current_z = 0.0
+        self.target_takeoff_alt = 1.5
         self.flight_state = 'BOOTING'
         self.boot_start_time = self.get_clock().now().nanoseconds / 1e9
         self.max_data_age = 0.3  # Adjusted for 15Hz physical reality
@@ -83,10 +89,13 @@ class StateMachineNode(Node):
     def rc_callback(self, msg):
         """ Hardware interrupt for safety kills. Absolute authority. """
         if len(msg.channels) > 7:
-            if msg.channels[7] > 1500:
+            if msg.channels[7] > 1900:
                 self.get_logger().fatal("HARDWARE KILL SWITCH ACTIVATED! DISARMING!")
                 self.disarm_drone()
-                
+
+    def pose_callback(self, msg):
+        self.current_z = msg.pose.position.z
+
     def mavros_state_callback(self, msg):
         self.current_mavros_state = msg
 
@@ -153,22 +162,25 @@ class StateMachineNode(Node):
         self.vision_speed_pub.publish(cov_msg)
 
         # -------------------------------------------------------------
-        # PHASE 1: THE GUIDED HANDSHAKE
+        # PHASE 1: THE GUIDED HANDSHAKE & TAKEOFF
         # -------------------------------------------------------------
         if self.flight_state == 'BOOTING':
-            self.velocity_publisher.publish(cmd_msg)
             elapsed = (current_time.nanoseconds / 1e9) - self.boot_start_time
-            # Increased wait time to 10 seconds to give EKF time to align
-            if elapsed > 10.0: 
+            if elapsed > 25.0: 
                 self.get_logger().info('EKF alignment period complete. Requesting GUIDED mode.')
                 self.request_guided_and_arm()
                 self.flight_state = 'AWAITING_AUTHORITY'
             return
 
         if self.flight_state in ['AWAITING_AUTHORITY', 'ARMING_REQUESTED']:
-            self.velocity_publisher.publish(cmd_msg)
             return
-            
+
+        if self.flight_state == 'TAKEOFF_IN_PROGRESS':
+            if self.current_z >= (self.target_takeoff_alt - 0.2):
+                self.get_logger().info(f'Takeoff altitude reached: {self.current_z:.2f}m. Entering FLYING state.')
+                self.flight_state = 'FLYING'
+            return
+
         if self.flight_state == 'DISARMED':
             return
 
@@ -195,16 +207,16 @@ class StateMachineNode(Node):
                     self.disarm_drone()
                     return
 
-        # Execute the Velocity Setpoint
-        cmd_msg.twist.linear.x = target_vx
-        cmd_msg.twist.linear.y = target_vy
+        # Execute the Velocity Setpoint (Zero horizontal velocity for GPS hover validation)
+        cmd_msg.twist.linear.x = 0.0
+        cmd_msg.twist.linear.y = 0.0
         cmd_msg.twist.linear.z = target_vz
-        cmd_msg.twist.angular.z = target_wz
+        cmd_msg.twist.angular.z = 0.0
         self.velocity_publisher.publish(cmd_msg)
 
     def request_guided_and_arm(self):
-        if not self.set_mode_client.wait_for_service(timeout_sec=2.0):
-            self.get_logger().error('Set_mode service unavailable. Boot failed.')
+        if not self.set_mode_client.service_is_ready():
+            self.get_logger().warn('Set_mode service not ready. Retrying next cycle.')
             return
             
         mode_req = SetMode.Request()
@@ -218,6 +230,10 @@ class StateMachineNode(Node):
             response = future.result()
             if response.mode_sent:
                 self.get_logger().info('GUIDED mode engaged. Requesting Motor Arming...')
+                if not self.arming_client.service_is_ready():
+                    self.get_logger().error('Arming service not ready. Retrying handshake.')
+                    self.trigger_boot_retry()
+                    return
                 arm_req = CommandBool.Request()
                 arm_req.value = True
                 
@@ -235,8 +251,8 @@ class StateMachineNode(Node):
         try:
             response = future.result()
             if response.success:
-                self.get_logger().info('Motors Armed. Execution Authority Granted. Entering FLYING state.')
-                self.flight_state = 'FLYING'
+                self.get_logger().info('Motors Armed. Requesting Takeoff...')
+                self.request_takeoff(self.target_takeoff_alt)
             else:
                 self.get_logger().error('Arming rejected (EKF not settled?). Retrying handshake.')
                 self.trigger_boot_retry()
@@ -244,8 +260,31 @@ class StateMachineNode(Node):
             self.get_logger().error(f'Arming service call failed: {e}. Retrying.')
             self.trigger_boot_retry()
 
+    def request_takeoff(self, altitude):
+        if not self.takeoff_client.service_is_ready():
+            self.get_logger().error('Takeoff service not ready. Retrying handshake.')
+            self.trigger_boot_retry()
+            return
+        takeoff_req = CommandTOL.Request()
+        takeoff_req.altitude = float(altitude)
+        future = self.takeoff_client.call_async(takeoff_req)
+        future.add_done_callback(self.takeoff_callback)
+        self.flight_state = 'TAKEOFF_IN_PROGRESS'
+
+    def takeoff_callback(self, future):
+        try:
+            response = future.result()
+            if response.success:
+                self.get_logger().info(f'Takeoff command accepted. Climbing to {self.target_takeoff_alt}m...')
+            else:
+                self.get_logger().error('Takeoff command rejected. Retrying handshake.')
+                self.trigger_boot_retry()
+        except Exception as e:
+            self.get_logger().error(f'Takeoff service call failed: {e}. Retrying.')
+            self.trigger_boot_retry()
+
     def set_mode(self, custom_mode):
-        if not self.set_mode_client.wait_for_service(timeout_sec=1.0):
+        if not self.set_mode_client.service_is_ready():
             return
         req = SetMode.Request()
         req.custom_mode = custom_mode
