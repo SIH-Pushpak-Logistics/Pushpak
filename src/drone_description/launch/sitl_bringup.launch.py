@@ -22,6 +22,7 @@ def generate_launch_description():
 
     # 1. Enforce the Global Time Domain
     use_sim_time = LaunchConfiguration('use_sim_time', default='true')
+    camera_rate = LaunchConfiguration('camera_rate', default='15')
 
     # 2. Boot the Transform Tree
     robot_state_publisher = Node(
@@ -29,7 +30,8 @@ def generate_launch_description():
         executable='robot_state_publisher',
         output='screen',
         parameters=[{
-            'robot_description': ParameterValue(Command(['xacro ', xacro_file]), value_type=str),
+            'robot_description': ParameterValue(
+                Command(['xacro ', xacro_file, ' camera_rate:=', camera_rate]), value_type=str),
             'use_sim_time': use_sim_time
         }]
     )
@@ -105,6 +107,9 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='true'),
+        DeclareLaunchArgument(
+            'camera_rate', default_value='15',
+            description='Camera update rate in Hz. 15 suits software-rendered hosts; pass 30 on GPU hosts.'),
         robot_state_publisher,
         gz_sim,
         spawn_entity_harmonic,

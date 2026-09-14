@@ -1,6 +1,10 @@
 <?xml version="1.0"?>
 <robot name="swarm_drone" xmlns:xacro="http://ros.org/wiki/xacro">
 
+  <xacro:arg name="camera_rate" default="30"/>
+  <xacro:arg name="camera_width" default="320"/>
+  <xacro:arg name="camera_height" default="240"/>
+
   <link name="base_link">
     <inertial>
       <mass value="1.5"/>
@@ -17,39 +21,6 @@
       <geometry><box size="0.4 0.4 0.1"/></geometry>
     </collision>
   </link>
-
-  <link name="lidar_link"/>
-  
-  <joint name="lidar_joint" type="fixed">
-    <parent link="base_link"/>
-    <child link="lidar_link"/>
-    <origin xyz="0 0 -0.05" rpy="0 0 0"/>
-  </joint>
-
-  <!-- Gazebo Harmonic Native Lidar Sensor -->
-  <gazebo reference="lidar_link">
-    <sensor name="lidar_sensor" type="gpu_lidar">
-      <always_on>true</always_on>
-      <visualize>false</visualize>
-      <update_rate>2</update_rate>
-      <topic>lidar</topic>
-      <lidar>
-        <scan>
-          <horizontal>
-            <samples>360</samples>
-            <resolution>1.0</resolution>
-            <min_angle>-3.14159</min_angle>
-            <max_angle>3.14159</max_angle>
-          </horizontal>
-        </scan>
-        <range>
-          <min>0.1</min>
-          <max>10.0</max>
-          <resolution>0.01</resolution>
-        </range>
-      </lidar>
-    </sensor>
-  </gazebo>
 
   <link name="camera_link">
     <inertial>
@@ -73,13 +44,13 @@
     <sensor name="camera_sensor" type="camera">
       <always_on>true</always_on>
       <visualize>false</visualize>
-      <update_rate>30</update_rate>
+      <update_rate>$(arg camera_rate)</update_rate>
       <topic>camera/image</topic>
       <camera>
         <horizontal_fov>1.047</horizontal_fov>
         <image>
-          <width>320</width>
-          <height>240</height>
+          <width>$(arg camera_width)</width>
+          <height>$(arg camera_height)</height>
           <format>R8G8B8</format>
         </image>
         <clip>

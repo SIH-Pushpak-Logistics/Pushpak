@@ -6,6 +6,15 @@ LOG="${LOG:-/workspace/sitl_run.log}"
 SENTINEL='swarm_drone::base_link::imu_sensor'
 BOOT_TIMEOUT="${BOOT_TIMEOUT:-15}"
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-6}"
+DRONE_ID="${DRONE_ID:-drone_00}"
+
+LOCK="/tmp/drone_sim_${DRONE_ID}.lock"
+exec 9>>"$LOCK" || { echo "[launch_sim] FATAL: cannot open lock file $LOCK" >&2; exit 3; }
+if ! flock -n 9; then
+    echo "[launch_sim] FATAL: another harness already holds $LOCK for ${DRONE_ID}." >&2
+    echo "[launch_sim]        Stop it, or run with DRONE_ID=<other> for a second agent." >&2
+    exit 5
+fi
 
 for f in /opt/ros/humble/setup.bash \
          /bridge_ws/install/setup.bash \
@@ -22,11 +31,18 @@ set +u
 . /workspace/install/setup.bash
 set -u
 
+export LP_NUM_THREADS="${LP_NUM_THREADS:-2}"
+
 redis-server --daemonize yes >/dev/null 2>&1
 if ! redis-cli PING >/dev/null 2>&1; then
     echo "[launch_sim] FATAL: redis-server not responding on 6379." >&2
     exit 3
 fi
+
+for pat in "telemetry:${DRONE_ID}:*" "swarm:${DRONE_ID}:*" "emergency_override:${DRONE_ID}"; do
+    redis-cli --scan --pattern "$pat" | xargs -r redis-cli DEL >/dev/null
+done
+echo "[launch_sim] cleared stale Redis keys for ${DRONE_ID}"
 
 if ! command -v ros2 >/dev/null 2>&1; then
     echo "[launch_sim] FATAL: ros2 not on PATH after sourcing setup files." >&2
