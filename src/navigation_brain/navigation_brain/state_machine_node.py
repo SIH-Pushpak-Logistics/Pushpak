@@ -68,7 +68,7 @@ class StateMachineNode(Node):
         self.target_takeoff_alt = 1.5
         self.flight_state = 'BOOTING'
         self.boot_start_time = self.get_clock().now().nanoseconds / 1e9
-        self.max_data_age = 0.3  # Adjusted for 15Hz physical reality
+        self.max_data_age = 0.45  # Tolerates 2 dropped frames at 6.15Hz software render
         self.feature_loss_counter = 0
 
         self.get_logger().info(f'Master State Machine booting for {self.drone_id}...')
@@ -207,11 +207,17 @@ class StateMachineNode(Node):
                     self.disarm_drone()
                     return
 
-        # Execute the Velocity Setpoint (Zero horizontal velocity for GPS hover validation)
-        cmd_msg.twist.linear.x = 0.0
-        cmd_msg.twist.linear.y = 0.0
+        # Execute the Velocity Setpoint (Respect Swarm Override if active, else hold hover)
+        if override_payload and not self.is_stale(override_payload.get('timestamp', 0)):
+            cmd_msg.twist.linear.x = target_vx
+            cmd_msg.twist.linear.y = target_vy
+            cmd_msg.twist.angular.z = target_wz
+        else:
+            cmd_msg.twist.linear.x = 0.0
+            cmd_msg.twist.linear.y = 0.0
+            cmd_msg.twist.angular.z = 0.0
+
         cmd_msg.twist.linear.z = target_vz
-        cmd_msg.twist.angular.z = 0.0
         self.velocity_publisher.publish(cmd_msg)
 
     def request_guided_and_arm(self):

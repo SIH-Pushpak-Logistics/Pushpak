@@ -9,7 +9,7 @@ class MissionNode(Node):
         super().__init__('mission_node')
 
         self.declare_parameter('drone_id', 'drone_00')
-        self.declare_parameter('target_altitude', 0.0)
+        self.declare_parameter('target_altitude', 1.5)
         self.declare_parameter('reset', False)
 
         self.drone_id = self.get_parameter('drone_id').get_parameter_value().string_value

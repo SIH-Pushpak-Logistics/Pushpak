@@ -22,35 +22,42 @@ class VisionNavigationNode(Node):
         self.prev_points = None
         self.prev_timestamp_sec = None
 
-        self.fx = 160.0
-        self.fy = 160.0
+        self.fx = 277.13
+        self.fy = 277.13
+
+        # Asynchronous sensor cache to eliminate time-synchronizer drops
+        self.latest_altitude = 1.0
+        self.latest_gyro_x = 0.0
+        self.latest_gyro_y = 0.0
 
         self.redis_publisher = RedisTelemetryPublisher(
             stream_name=f'telemetry:{self.drone_id}:raw_optical_flow', 
             logger=self.get_logger()
         )
 
-        self.camera_sub = message_filters.Subscriber(self, Image, '/camera/image_raw', qos_profile=qos_profile_sensor_data)
-        self.altitude_sub = message_filters.Subscriber(self, PointStamped, '/drone/altitude', qos_profile=qos_profile_sensor_data)
-        self.imu_sub = message_filters.Subscriber(self, Imu, '/mavros/imu/data', qos_profile=qos_profile_sensor_data)
-
-        self.ts = message_filters.ApproximateTimeSynchronizer(
-            [self.camera_sub, self.altitude_sub, self.imu_sub],
-            queue_size=30,
-            slop=0.25
+        self.camera_sub = self.create_subscription(
+            Image, '/camera/image_raw', self.image_callback, qos_profile_sensor_data
         )
-        self.ts.registerCallback(self.synchronized_callback)
+        self.altitude_sub = self.create_subscription(
+            PointStamped, '/drone/altitude', self.altitude_callback, qos_profile_sensor_data
+        )
+        self.imu_sub = self.create_subscription(
+            Imu, '/mavros/imu/data', self.imu_callback, qos_profile_sensor_data
+        )
 
-    def synchronized_callback(self, image_msg, alt_msg, imu_msg):
+    def altitude_callback(self, msg):
+        self.latest_altitude = max(0.1, float(msg.point.z))
+
+    def imu_callback(self, msg):
+        self.latest_gyro_x = float(msg.angular_velocity.x)
+        self.latest_gyro_y = float(msg.angular_velocity.y)
+
+    def image_callback(self, image_msg):
         try:
             cv_image = self.bridge.imgmsg_to_cv2(image_msg, desired_encoding='bgr8')
         except CvBridgeError as e:
             self.get_logger().error(f'CvBridge Failure: {str(e)}')
             return
-
-        current_altitude = alt_msg.point.z
-        gyro_x = imu_msg.angular_velocity.x
-        gyro_y = imu_msg.angular_velocity.y
 
         timestamp_sec = (
             image_msg.header.stamp.sec + 
@@ -58,10 +65,9 @@ class VisionNavigationNode(Node):
         )
 
         is_valid, vx, vy, num_features = self.process_vision_pipeline(
-            cv_image, current_altitude, gyro_x, gyro_y, timestamp_sec
+            cv_image, self.latest_altitude, self.latest_gyro_x, self.latest_gyro_y, timestamp_sec
         )
 
-        # CONTRACT UPDATE: Passing features to the publisher
         self.redis_publisher.send_velocity_vector(
             self.drone_id, timestamp_sec, vx, vy, 0.0, 0.0, is_valid=is_valid, features=num_features
         )
@@ -113,19 +119,24 @@ class VisionNavigationNode(Node):
         dx = good_new[:, 0] - good_old[:, 0]
         dy = good_new[:, 1] - good_old[:, 1]
 
-        u_raw = dx.mean()
-        v_raw = dy.mean()
+        u_raw = float(dx.mean())
+        v_raw = float(dy.mean())
 
-        u_translation = u_raw - (gyro_y * self.fx)
-        v_translation = v_raw - (gyro_x * self.fy)
+        # Dimensionally correct gyro de-rotation (omega * dt * f)
+        u_rot = -gyro_x * dt * self.fx
+        v_rot = gyro_y * dt * self.fy
 
-        vx = (u_translation * current_altitude) / (self.fx * dt)
-        vy = (v_translation * current_altitude) / (self.fy * dt)
+        u_trans = u_raw - u_rot
+        v_trans = v_raw - v_rot
+
+        # Empirically verified mapping: -u -> X_base (forward), v -> Y_base (lateral)
+        vx = (-u_trans * current_altitude) / (self.fx * dt)
+        vy = (v_trans * current_altitude) / (self.fy * dt)
 
         self.prev_gray = gray
-        if num_features < 25:
+        if num_features < 50:
             pts = cv2.goodFeaturesToTrack(
-                gray, maxCorners=100, qualityLevel=0.3, minDistance=7, blockSize=7
+                gray, maxCorners=250, qualityLevel=0.02, minDistance=7, blockSize=7
             )
             if pts is not None and len(pts) > 0:
                 self.prev_points = pts

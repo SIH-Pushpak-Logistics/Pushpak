@@ -59,6 +59,10 @@ class AltitudeControlNode(Node):
         target_payload = self.redis_subscriber.get_latest(self.target_stream)
         if target_payload and 'target_altitude' in target_payload:
             self.target_altitude = float(target_payload.get('target_altitude', self.target_altitude))
+            if self.target_altitude > 0.5 and self.cut_motors_intent:
+                self.get_logger().info('Positive climb target received. Releasing cut_motors latch.')
+                self.cut_motors_intent = False
+                self.touchdown_counter = 0
 
         # 3. Poll Redis for Current Altitude
         alt_payload = self.redis_subscriber.get_latest(self.altitude_stream)
