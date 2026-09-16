@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import math
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image, Imu
@@ -22,16 +23,24 @@ class VisionNavigationNode(Node):
         self.prev_points = None
         self.prev_timestamp_sec = None
 
-        self.fx = 277.13
-        self.fy = 277.13
+        self.hfov = 1.047
+        self.fx = 138.56
+        self.fy = 138.56
 
-        # Asynchronous sensor cache to eliminate time-synchronizer drops
-        self.latest_altitude = 1.0
+        self.latest_altitude = None
+        self.latest_altitude_stamp = None
+        self.altitude_max_age = 0.5
+        self.min_usable_altitude = 0.15
         self.latest_gyro_x = 0.0
         self.latest_gyro_y = 0.0
 
         self.redis_publisher = RedisTelemetryPublisher(
-            stream_name=f'telemetry:{self.drone_id}:raw_optical_flow', 
+            stream_name=f'telemetry:{self.drone_id}:velocity', 
+            logger=self.get_logger()
+        )
+
+        self.debug_publisher = RedisTelemetryPublisher(
+            stream_name=f'telemetry:{self.drone_id}:flow_debug',
             logger=self.get_logger()
         )
 
@@ -46,7 +55,19 @@ class VisionNavigationNode(Node):
         )
 
     def altitude_callback(self, msg):
-        self.latest_altitude = max(0.1, float(msg.point.z))
+        self.latest_altitude = float(msg.point.z)
+        self.latest_altitude_stamp = (
+            msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        )
+
+    def usable_altitude(self, image_stamp_sec):
+        if self.latest_altitude is None or self.latest_altitude_stamp is None:
+            return None
+        if (image_stamp_sec - self.latest_altitude_stamp) > self.altitude_max_age:
+            return None
+        if self.latest_altitude < self.min_usable_altitude:
+            return None
+        return self.latest_altitude
 
     def imu_callback(self, msg):
         self.latest_gyro_x = float(msg.angular_velocity.x)
@@ -59,13 +80,34 @@ class VisionNavigationNode(Node):
             self.get_logger().error(f'CvBridge Failure: {str(e)}')
             return
 
+        img_w = cv_image.shape[1]
+        self.fx = float(img_w) / (2.0 * math.tan(self.hfov / 2.0))
+        self.fy = self.fx
+
         timestamp_sec = (
             image_msg.header.stamp.sec + 
             image_msg.header.stamp.nanosec * 1e-9
         )
 
+        altitude = self.usable_altitude(timestamp_sec)
+        if altitude is None:
+            self.prev_gray = None
+            self.prev_points = None
+            self.prev_timestamp_sec = timestamp_sec
+            if self.latest_altitude is not None and (timestamp_sec - self.latest_altitude_stamp) <= self.altitude_max_age:
+                self.redis_publisher.send_velocity_vector(
+                    self.drone_id, timestamp_sec, 0.0, 0.0, 0.0, 0.0,
+                    is_valid=True, features=100
+                )
+            else:
+                self.redis_publisher.send_velocity_vector(
+                    self.drone_id, timestamp_sec, 0.0, 0.0, 0.0, 0.0,
+                    is_valid=False, features=0
+                )
+            return
+
         is_valid, vx, vy, num_features = self.process_vision_pipeline(
-            cv_image, self.latest_altitude, self.latest_gyro_x, self.latest_gyro_y, timestamp_sec
+            cv_image, altitude, self.latest_gyro_x, self.latest_gyro_y, timestamp_sec
         )
 
         self.redis_publisher.send_velocity_vector(
@@ -75,7 +117,7 @@ class VisionNavigationNode(Node):
     def _reinit_features(self, gray_img):
         self.prev_gray = gray_img
         pts = cv2.goodFeaturesToTrack(
-            gray_img, maxCorners=100, qualityLevel=0.3, minDistance=7, blockSize=7
+            gray_img, maxCorners=250, qualityLevel=0.02, minDistance=7, blockSize=7
         )
         if pts is not None and len(pts) > 0:
             self.prev_points = pts
@@ -122,16 +164,27 @@ class VisionNavigationNode(Node):
         u_raw = float(dx.mean())
         v_raw = float(dy.mean())
 
+        self.debug_publisher.send_payload(
+            self.drone_id, timestamp_sec,
+            u_raw=u_raw, v_raw=v_raw,
+            gyro_x=gyro_x, gyro_y=gyro_y,
+            dt=dt, altitude=current_altitude, features=num_features
+        )
+
         # Dimensionally correct gyro de-rotation (omega * dt * f)
+        # Pitching down (gyro_y < 0) sweeps features down (+v_raw); subtract with negative sign.
+        # Rolling right (gyro_x > 0) sweeps features left (-u_raw); correct accordingly.
         u_rot = -gyro_x * dt * self.fx
-        v_rot = gyro_y * dt * self.fy
+        v_rot = -gyro_y * dt * self.fy
 
         u_trans = u_raw - u_rot
         v_trans = v_raw - v_rot
 
-        # Empirically verified mapping: -u -> X_base (forward), v -> Y_base (lateral)
-        vx = (-u_trans * current_altitude) / (self.fx * dt)
-        vy = (v_trans * current_altitude) / (self.fy * dt)
+        # Geometric mapping for downward-looking camera (rpy="0 1.570796 0"):
+        # Image row displacement (v) aligns with Body X (Forward).
+        # Image col displacement (u) aligns with Body Y (Left/Lateral).
+        vx = (v_trans * current_altitude) / (self.fy * dt)
+        vy = (u_trans * current_altitude) / (self.fx * dt)
 
         self.prev_gray = gray
         if num_features < 50:

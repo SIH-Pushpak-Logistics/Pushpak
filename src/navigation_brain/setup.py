@@ -25,6 +25,9 @@ setup(
         'console_scripts': [
             'vision_nav_node = navigation_brain.vision_nav_node:main',
             'state_machine_node = navigation_brain.state_machine_node:main',
+            'vio_bridge_node = navigation_brain.vio_bridge_node:main',
+            'gazebo_odom_adapter_node = navigation_brain.gazebo_odom_adapter_node:main',
+            'sim_vio_node = navigation_brain.sim_vio_node:main',
             'landing_state_node = navigation_brain.landing_state_node:main',
             'anti_sway_filter = navigation_brain.anti_sway_filter:main',
             'altimeter_node = navigation_brain.altimeter_node:main',

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
+import math
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import PoseStamped, PointStamped
+from sensor_msgs.msg import LaserScan
+from geometry_msgs.msg import PointStamped
 from rclpy.qos import qos_profile_sensor_data
 from swarm_utils.redis_bridge import RedisTelemetryPublisher
 
@@ -19,19 +21,32 @@ class AltimeterNode(Node):
 
         self.pub = self.create_publisher(PointStamped, '/drone/altitude', qos_profile_sensor_data)
         self.sub = self.create_subscription(
-            PoseStamped, '/mavros/local_position/pose',
-            self.pose_cb, qos_profile_sensor_data)
-        self.get_logger().info('Altimeter node up: /mavros/local_position/pose -> /drone/altitude')
+            LaserScan, '/drone/rangefinder/scan',
+            self.scan_cb, qos_profile_sensor_data)
+        self.get_logger().info('Altimeter node active: /drone/rangefinder/scan -> /drone/altitude')
 
-    def pose_cb(self, msg):
+    def scan_cb(self, msg: LaserScan):
+        if not msg.ranges:
+            return
+        z = msg.ranges[0]
+        
+        # Only clamp to 0.05m if reading is below range_min (on physical skids).
+        # If the beam missed completely (inf/nan), do not fake a landed altitude.
+        if math.isnan(z):
+            return
+        if math.isinf(z) or z <= 0.0 or z < msg.range_min:
+            z = 0.05
+        elif z > msg.range_max:
+            z = msg.range_max
+
         out = PointStamped()
         out.header = msg.header
-        out.point.z = msg.pose.position.z
+        out.point.z = float(z)
         self.pub.publish(out)
 
         stamp_sec = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         self.redis_publisher.send_payload(
-            self.drone_id, stamp_sec, z=float(msg.pose.position.z)
+            self.drone_id, stamp_sec, z=float(z)
         )
 
 

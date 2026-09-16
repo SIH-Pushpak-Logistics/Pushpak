@@ -20,9 +20,11 @@ def generate_launch_description():
     # Path to the parameters mapped via docker-compose volume
     ardupilot_param_file = '/workspace/firmware/ardupilot_config/base_iris.param'
 
-    # 1. Enforce the Global Time Domain
+    # 1. Enforce the Global Time Domain & Sensor Resolution
     use_sim_time = LaunchConfiguration('use_sim_time', default='true')
     camera_rate = LaunchConfiguration('camera_rate', default='15')
+    camera_width = LaunchConfiguration('camera_width', default='160')
+    camera_height = LaunchConfiguration('camera_height', default='120')
 
     # 2. Boot the Transform Tree
     robot_state_publisher = Node(
@@ -31,7 +33,12 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'robot_description': ParameterValue(
-                Command(['xacro ', xacro_file, ' camera_rate:=', camera_rate]), value_type=str),
+                Command([
+                    'xacro ', xacro_file,
+                    ' camera_rate:=', camera_rate,
+                    ' camera_width:=', camera_width,
+                    ' camera_height:=', camera_height
+                ]), value_type=str),
             'use_sim_time': use_sim_time
         }]
     )
@@ -110,6 +117,8 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'camera_rate', default_value='15',
             description='Camera update rate in Hz. 15 suits software-rendered hosts; pass 30 on GPU hosts.'),
+        DeclareLaunchArgument('camera_width', default_value='160', description='Camera image width in pixels'),
+        DeclareLaunchArgument('camera_height', default_value='120', description='Camera image height in pixels'),
         robot_state_publisher,
         gz_sim,
         spawn_entity_harmonic,
