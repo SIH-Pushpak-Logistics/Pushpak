@@ -38,13 +38,22 @@ class VioBridgeNode(Node):
         if self.latest_odom is None:
             return
 
-        now_stamp = self.get_clock().now().to_msg()
+        now_ns = self.get_clock().now().nanoseconds
+        odom_ns = (
+            self.latest_odom.header.stamp.sec * 1_000_000_000
+            + self.latest_odom.header.stamp.nanosec
+        )
+        age_sec = (now_ns - odom_ns) * 1e-9
+        if age_sec > 0.1 or age_sec < 0.0:
+            return
+
+        odom_stamp = self.latest_odom.header.stamp
         pos = self.latest_odom.pose.pose.position
         ori = self.latest_odom.pose.pose.orientation
 
         # 1. Forward 6-DOF Pose in Inertial Frame ('map')
         pose_msg = PoseStamped()
-        pose_msg.header.stamp = now_stamp
+        pose_msg.header.stamp = odom_stamp
         pose_msg.header.frame_id = 'map'
         pose_msg.pose.position = pos
         pose_msg.pose.orientation = ori
@@ -66,7 +75,7 @@ class VioBridgeNode(Node):
         vz_enu = vz_b
 
         twist_msg = TwistWithCovarianceStamped()
-        twist_msg.header.stamp = now_stamp
+        twist_msg.header.stamp = odom_stamp
         twist_msg.header.frame_id = 'map'
         twist_msg.twist.twist.linear.x = vx_enu
         twist_msg.twist.twist.linear.y = vy_enu

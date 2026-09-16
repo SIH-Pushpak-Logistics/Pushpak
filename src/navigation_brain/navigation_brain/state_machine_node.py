@@ -70,12 +70,35 @@ class StateMachineNode(Node):
         self.current_mavros_state = msg
 
     def control_loop_cb(self):
+        if self.flight_state == 'RELINQUISHED':
+            return
+
+        # 1. Mode Overwatch & Airborne Armed Integrity
+        if self.flight_state in ('ARMED', 'TAKEOFF_IN_PROGRESS', 'FLYING'):
+            if self.current_mavros_state.mode != 'GUIDED':
+                self.get_logger().warn(
+                    f'Mode deviation ({self.current_mavros_state.mode} != GUIDED). Relinquishing control.'
+                )
+                self.flight_state = 'RELINQUISHED'
+                return
+
+            if self.flight_state == 'FLYING' and not self.current_mavros_state.armed:
+                self.get_logger().warn('Disarmed while FLYING. Relinquishing control.')
+                self.flight_state = 'RELINQUISHED'
+                return
+
+        # 2. Ingest Altitude with Freshness Gate (< 0.5s)
         alt_payload = self.redis_sub.get_latest(self.altitude_stream)
+        alt_fresh = False
         if alt_payload:
-            self.current_z = float(alt_payload.get('z', self.current_z))
+            now_sec = self.get_clock().now().nanoseconds * 1e-9
+            stamp = float(alt_payload.get('timestamp', 0.0))
+            if 0.0 <= (now_sec - stamp) <= 0.5:
+                self.current_z = float(alt_payload.get('z', self.current_z))
+                alt_fresh = True
 
         if self.flight_state == 'TAKEOFF_IN_PROGRESS':
-            if self.current_z >= (self.target_takeoff_alt - 0.2):
+            if alt_fresh and self.current_z >= (self.target_takeoff_alt - 0.2):
                 self.get_logger().info(f'Takeoff target reached ({self.current_z:.2f}m). Locking 2.0m HOVER.')
                 self.flight_state = 'FLYING'
 
@@ -91,16 +114,21 @@ class StateMachineNode(Node):
             self.pos_setpoint_pub.publish(hold_msg)
 
     def handshake_timer_cb(self):
+        if self.flight_state in ('FLYING', 'RELINQUISHED', 'TAKEOFF_IN_PROGRESS'):
+            return
+
         now_sec = self.get_clock().now().nanoseconds / 1e9
         elapsed = now_sec - self.boot_start_time
 
-        origin_msg = GeoPointStamped()
-        origin_msg.header.stamp = self.get_clock().now().to_msg()
-        origin_msg.header.frame_id = 'earth'
-        origin_msg.position.latitude = -35.363261
-        origin_msg.position.longitude = 149.165230
-        origin_msg.position.altitude = 584.0
-        self.origin_pub.publish(origin_msg)
+        # Bounded origin publishing: only publish until home is acquired
+        if self.flight_state in ('BOOTING', 'HOME_ACQUIRED'):
+            origin_msg = GeoPointStamped()
+            origin_msg.header.stamp = self.get_clock().now().to_msg()
+            origin_msg.header.frame_id = 'earth'
+            origin_msg.position.latitude = -35.363261
+            origin_msg.position.longitude = 149.165230
+            origin_msg.position.altitude = 584.0
+            self.origin_pub.publish(origin_msg)
 
         if self.flight_state == 'BOOTING':
             if elapsed > 10.0 and not self.home_service_sent:
@@ -190,9 +218,11 @@ class StateMachineNode(Node):
                 self.get_logger().info(f'Takeoff accepted! Climbing to {self.target_takeoff_alt:.1f}m.')
                 self.flight_state = 'TAKEOFF_IN_PROGRESS'
             else:
-                self.execute_takeoff()
-        except Exception:
-            pass
+                self.get_logger().error('Takeoff rejected by FCU. Relinquishing control.')
+                self.flight_state = 'RELINQUISHED'
+        except Exception as e:
+            self.get_logger().error(f'Takeoff call failed: {e}. Relinquishing control.')
+            self.flight_state = 'RELINQUISHED'
 
 
 def main(args=None):
