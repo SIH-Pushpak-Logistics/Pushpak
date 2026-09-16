@@ -76,7 +76,7 @@ INS_USE3         0
 INS_ENABLE_MASK  1
 
 # Disable simulation pre-arm calibration checks
-ARMING_CHECK     0
+ARMING_CHECK 1
 
 # === Locked Pure VIO Architecture ===
 VISO_TYPE        1
@@ -84,3 +84,9 @@ EK3_SRC1_POSXY   6
 EK3_SRC1_VELXY   6
 EK3_SRC1_YAW     6
 COMPASS_USE      0
+INS_ACC2OFFS_X 0.0
+INS_ACC2OFFS_Y 0.0
+INS_ACC2OFFS_Z 0.0
+INS_ACC2SCAL_X 1.0
+INS_ACC2SCAL_Y 1.0
+INS_ACC2SCAL_Z 1.0
