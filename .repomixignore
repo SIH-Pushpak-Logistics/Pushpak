@@ -1,18 +1,21 @@
-# Ignore ROS 2 build artifacts and logs
-build/
-install/
-log/
+# Third-party source backups (not our code)
+ArduPilotPlugin.cc.orig
+dumpstack.sh
+dumpcore.sh
 
-# Ignore heavy 3D mesh files and textures (AI cannot read these)
-*.world
-*.dae
-*.stl
-*.png
-*.jpg
-*.jpeg
-*.mtl
-*.obj
+# Crash artifacts
+dumpstack.sh_arducopter.*.out
+dumpcore.sh_arducopter.*.out
+*.core
+ap-*.core
 
-# Ignore standard Python cache
-__pycache__/
-*.pyc
+# Runtime artifacts
+mav.tlog
+mav.tlog.raw
+eeprom.bin
+*.log
+sitl_run.log
+race_*.log
+
+# ML dataset output
+drone_telemetry_dataset.csv

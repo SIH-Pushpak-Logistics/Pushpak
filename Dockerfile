@@ -28,6 +28,7 @@ RUN apt-get update && apt-get install -y curl gnupg lsb-release \
     build-essential \
     python3-colcon-common-extensions \
     python3-rosdep \
+    && /opt/ros/humble/lib/mavros/install_geographiclib_datasets.sh \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install redis 'numpy<2' control scipy
@@ -67,17 +68,23 @@ RUN apt-get update && apt-get install -y \
     gstreamer1.0-plugins-bad \
     && rm -rf /var/lib/apt/lists/*
 
+COPY patches/ardupilot_gazebo_imu_retry.patch /tmp/ardupilot_gazebo_imu_retry.patch
 RUN git clone https://github.com/ArduPilot/ardupilot_gazebo.git . \
+    && git checkout 082a0fe231f6e63bc8d1598f1cba461d9e2ea7f5 \
+    && patch src/ArduPilotPlugin.cc < /tmp/ardupilot_gazebo_imu_retry.patch \
     && mkdir build && cd build \
     && GZ_VERSION=harmonic cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     && make -j2 \
     && make install
 
 # 5. Environment Setup
+ENV GZ_VERSION=harmonic
+ENV GZ_SIM_SYSTEM_PLUGIN_PATH=/usr/local/lib/ardupilot_gazebo:/usr/local/lib:${GZ_SIM_SYSTEM_PLUGIN_PATH}
+ENV LD_LIBRARY_PATH=/usr/local/lib:${LD_LIBRARY_PATH}
+
 RUN echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc \
     && echo "source /bridge_ws/install/setup.bash" >> ~/.bashrc \
-    && echo "export GZ_VERSION=harmonic" >> ~/.bashrc \
-    && echo "export GZ_SIM_SYSTEM_PLUGIN_PATH=/usr/local/lib:\$GZ_SIM_SYSTEM_PLUGIN_PATH" >> ~/.bashrc
+    && echo "[ -f /workspace/install/setup.bash ] && source /workspace/install/setup.bash" >> ~/.bashrc
 
 # Set the final working directory for your host mount
 WORKDIR /workspace

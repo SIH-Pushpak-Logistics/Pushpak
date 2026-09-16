@@ -21,6 +21,12 @@ def generate_launch_description():
     )
 
     # 3. Build and Return the Execution Graph
-    return LaunchDescription([
-        bridge_node
-    ])
+    common = {'use_sim_time': True, 'drone_id': 'drone_00'}
+
+    brain_nodes = [
+        Node(package='navigation_brain', executable=exe, name=exe,
+             output='screen', parameters=[common])
+        for exe in ['altimeter_node', 'mission_node', 'vision_nav_node', 'landing_state_node', 'gazebo_odom_adapter_node', 'vio_bridge_node', 'state_machine_node']
+    ]
+
+    return LaunchDescription([bridge_node] + brain_nodes)
