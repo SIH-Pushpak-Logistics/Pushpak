@@ -12,7 +12,6 @@ core.*
 redis.zip
 redis_win/
 dump.rdb
-docs/
 
 # =========================
 # Python
@@ -70,3 +69,8 @@ eeprom.bin
 drone_telemetry_dataset.csv
 terrain/
 repomix-output.xml
+
+# --- session artifacts ---
+logs/
+figs/*.png
+detections/

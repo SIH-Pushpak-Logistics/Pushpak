@@ -9,7 +9,10 @@ class RedisTelemetryPublisher:
         self.logger = logger
         
         try:
-            self.client = redis.Redis(host=host, port=port, decode_responses=True)
+            self.client = redis.Redis(
+                host=host, port=port, decode_responses=True,
+                socket_timeout=0.2, socket_connect_timeout=0.5
+            )
             self.client.ping()
             if self.logger:
                 self.logger.info(f"Redis Bridge connected. Stream: {self.stream_name}")
@@ -96,7 +99,10 @@ class RedisTelemetrySubscriber:
         self.logger = logger
         
         try:
-            self.client = redis.Redis(host=host, port=port, decode_responses=True)
+            self.client = redis.Redis(
+                host=host, port=port, decode_responses=True,
+                socket_timeout=0.2, socket_connect_timeout=0.5
+            )
             self.client.ping()
         except redis.RedisError as e:
             if self.logger:
@@ -106,6 +112,7 @@ class RedisTelemetrySubscriber:
         # Thread-safe local storage for the 20Hz loop to read instantly
         self._lock = threading.Lock()
         self._latest_data = {stream: None for stream in streams}
+        self._latest_timestamp = {stream: 0.0 for stream in streams}
 
         # Background worker that polls the indexed message queue at 100Hz
         self._worker = threading.Thread(target=self._poll_loop, daemon=True)
@@ -126,10 +133,12 @@ class RedisTelemetrySubscriber:
                 results = pipeline.execute()
 
                 # ACQUIRE LOCK once per cycle, not once per stream.
+                now_mono = time.monotonic()
                 with self._lock:
                     for i, stream in enumerate(self.streams):
                         if results[i]:
                             self._latest_data[stream] = results[i][0][1]
+                            self._latest_timestamp[stream] = now_mono
 
             except redis.RedisError as e:
                 if self.logger:
@@ -139,8 +148,23 @@ class RedisTelemetrySubscriber:
             # Prevent the daemon from maxing out the CPU core
             time.sleep(0.01)
 
-    def get_latest(self, stream_name):
-        """ Returns the latest payload in sub-millisecond time. No network I/O. """
-        # ACQUIRE LOCK: Stop the background thread from overwriting while we read
+    def get_latest(self, stream_name, max_age_sec=None):
+        """ Returns the latest payload in sub-millisecond time. No network I/O.
+            If max_age_sec is specified, returns None if the sample is stale. """
         with self._lock:
-            return self._latest_data.get(stream_name)
+            data = self._latest_data.get(stream_name)
+            if data is None:
+                return None
+            if max_age_sec is not None:
+                age = time.monotonic() - self._latest_timestamp.get(stream_name, 0.0)
+                if age > max_age_sec:
+                    return None
+            return data
+
+    def get_age(self, stream_name):
+        """ Returns wall-clock age in seconds since this stream was updated. """
+        with self._lock:
+            t = self._latest_timestamp.get(stream_name, 0.0)
+            if t == 0.0:
+                return float('inf')
+            return time.monotonic() - t

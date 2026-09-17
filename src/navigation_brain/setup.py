@@ -32,6 +32,7 @@ setup(
             'anti_sway_filter = navigation_brain.anti_sway_filter:main',
             'altimeter_node = navigation_brain.altimeter_node:main',
             'mission_node = navigation_brain.mission_node:main',
+            'yolo_node = navigation_brain.yolo_node:main',
 
         ],
     },

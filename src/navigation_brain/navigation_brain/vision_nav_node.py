@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import math
+import numpy as np
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image, Imu
@@ -164,9 +165,16 @@ class VisionNavigationNode(Node):
         u_raw = float(dx.mean())
         v_raw = float(dy.mean())
 
+        frame_diff = float(np.mean(np.abs(
+            gray.astype(np.int16) - self.prev_gray.astype(np.int16)
+        )))
+
         self.debug_publisher.send_payload(
             self.drone_id, timestamp_sec,
             u_raw=u_raw, v_raw=v_raw,
+            u_med=float(np.median(dx)), v_med=float(np.median(dy)),
+            u_std=float(dx.std()), v_std=float(dy.std()),
+            frame_diff=frame_diff,
             gyro_x=gyro_x, gyro_y=gyro_y,
             dt=dt, altitude=current_altitude, features=num_features
         )
