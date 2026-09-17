@@ -2,6 +2,7 @@
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped
+from nav_msgs.msg import Odometry
 from mavros_msgs.msg import State
 from mavros_msgs.srv import CommandBool, SetMode, CommandHome, CommandTOL
 from geographic_msgs.msg import GeoPointStamped
@@ -57,6 +58,8 @@ class StateMachineNode(Node):
         self.guided_requested = False
 
         self.create_timer(1.0, self.handshake_timer_cb)
+        self.last_vio_stamp = 0.0
+        self.vio_sub = self.create_subscription(Odometry, '/vio/odometry', self.vio_cb, 10)
         self.create_timer(0.05, self.control_loop_cb)
         self.get_logger().info(f'Clean GUIDED State Machine initialized for {self.drone_id}.')
 
@@ -65,6 +68,9 @@ class StateMachineNode(Node):
         self.target_pose_y = msg.pose.position.y
         self.target_pose_z = msg.pose.position.z
         self.get_logger().info(f'New target waypoint received: ({self.target_pose_x:.2f}, {self.target_pose_y:.2f}, {self.target_pose_z:.2f})')
+
+    def vio_cb(self, msg: Odometry):
+        self.last_vio_stamp = self.get_clock().now().nanoseconds * 1e-9
 
     def mavros_state_cb(self, msg: State):
         self.current_mavros_state = msg
@@ -88,6 +94,15 @@ class StateMachineNode(Node):
                 return
 
         # 2. Ingest Altitude with Freshness Gate (< 0.5s)
+        # VIO Watchdog: Trip failsafe if vision drops during active flight
+        if self.flight_state in ('TAKEOFF_IN_PROGRESS', 'FLYING'):
+            now_sec = self.get_clock().now().nanoseconds * 1e-9
+            if self.last_vio_stamp > 0.0 and (now_sec - self.last_vio_stamp) > 0.25:
+                self.get_logger().error(f'VIO WATCHDOG TRIPPED: Odometry silent for {now_sec - self.last_vio_stamp:.2f}s! Aborting to LAND.')
+                self.flight_state = 'RELINQUISHED'
+                self.request_fcu_land()
+                return
+
         alt_payload = self.redis_sub.get_latest(self.altitude_stream)
         alt_fresh = False
         if alt_payload:
@@ -112,6 +127,14 @@ class StateMachineNode(Node):
             hold_msg.pose.orientation.z = -0.7071
             hold_msg.pose.orientation.w = 0.7071
             self.pos_setpoint_pub.publish(hold_msg)
+
+    def request_fcu_land(self):
+        client = self.create_client(SetMode, '/mavros/set_mode')
+        if client.wait_for_service(timeout_sec=0.5):
+            req = SetMode.Request()
+            req.custom_mode = 'LAND'
+            client.call_async(req)
+            self.get_logger().warn('Emergency LAND command dispatched to FCU.')
 
     def handshake_timer_cb(self):
         if self.flight_state in ('FLYING', 'RELINQUISHED', 'TAKEOFF_IN_PROGRESS'):
