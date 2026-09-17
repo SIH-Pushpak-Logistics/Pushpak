@@ -33,7 +33,9 @@ setup(
             'altimeter_node = navigation_brain.altimeter_node:main',
             'mission_node = navigation_brain.mission_node:main',
             'yolo_node = navigation_brain.yolo_node:main',
-
+            'pose_publisher_node = navigation_brain.pose_publisher_node:main',
+            'link_monitor_node = navigation_brain.link_monitor_node:main',
+            'commander_node = navigation_brain.commander_node:main',
         ],
     },
 )

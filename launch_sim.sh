@@ -79,7 +79,7 @@ for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
     sleep 2
     : > "$LOG"
 
-    setsid ros2 launch drone_description sitl_bringup.launch.py > "$LOG" 2>&1 &
+    setsid ros2 launch drone_description sitl_bringup.launch.py "$@" > "$LOG" 2>&1 &
     LAUNCH_PGID=$!
 
     ok=0
