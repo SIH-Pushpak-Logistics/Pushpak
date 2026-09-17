@@ -76,30 +76,58 @@ class YoloNode(Node):
             return None
 
     def run_inference(self, frame):
-        """Return a list of dicts:
-           {'class_name': str, 'confidence': float,
-            'bbox': (x, y, w, h)}    # pixels, top-left origin
-           Return [] when nothing is found. Never raise.
+        """Return raw person detections in the stream contract format.
+
+        {'class_name': 'person', 'confidence': float,
+         'bbox': (x, y, w, h)}
+
+        Coordinates are pixels with a top-left origin.
+        Returns [] on any inference/parsing failure and never raises.
         """
         if self.model is None:
             return []
-        out = []
+
         try:
             results = self.model(frame, verbose=False)
-            for r in results:
-                for box in r.boxes:
+            out = []
+
+            for result in results:
+                names = result.names
+
+                for box in result.boxes:
                     conf = float(box.conf[0])
+
                     if conf < self.conf_threshold:
                         continue
-                    name = r.names[int(box.cls[0])]
-                    if name != 'person':
+
+                    class_id = int(box.cls[0])
+                    class_name = names[class_id]
+
+                    if class_name != 'person':
                         continue
-                    x1, y1, x2, y2 = [float(v) for v in box.xyxy[0]]
-                    out.append({'class_name': name, 'confidence': conf,
-                                'bbox': (x1, y1, x2 - x1, y2 - y1)})
+
+                    x1, y1, x2, y2 = (
+                        float(value) for value in box.xyxy[0]
+                    )
+
+                    width = x2 - x1
+                    height = y2 - y1
+
+                    if width <= 0 or height <= 0:
+                        continue
+
+                    out.append({
+                        'class_name': 'person',
+                        'confidence': conf,
+                        'bbox': (x1, y1, width, height),
+                    })
+
+            return out
+
         except Exception as exc:
             self.get_logger().warn(f'inference failed: {exc}')
-        return out
+            return []
+
     # ------------------------------------------------------------------
 
     def image_cb(self, msg: Image):
