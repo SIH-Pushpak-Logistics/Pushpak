@@ -1,0 +1,75 @@
+docker exec -i swarm_brain_container bash -s <<'EOF'
+cat << 'SDFEOF' > /workspace/src/drone_description/worlds/swarm_disaster.sdf
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <world name="empty">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-contact-system" name="gz::sim::systems::Contact"/>
+    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <light type="directional" name="sun">
+      <cast_shadows>false</cast_shadows>
+      <pose>0 0 15 0 0 0</pose>
+      <diffuse>0.9 0.9 0.9 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <!-- Disaster Environment Model -->
+    <model name="disaster_environment">
+      <static>true</static>
+      <!-- Apply 90 deg rotation around X to fix Blender glTF Y-up to Gazebo Z-up -->
+      <pose>0 0 0 1.570796 0 0</pose>
+      <link name="environment_link">
+        <visual name="visual">
+          <geometry>
+            <mesh>
+              <uri>/workspace/src/drone_description/materials/disaster_zone.glb</uri>
+            </mesh>
+          </geometry>
+        </visual>
+        <!-- Strict Flat Collision Plane: Never compute trimesh contacts on debris -->
+        <collision name="flat_ground_collision">
+          <geometry>
+            <plane>
+              <normal>0 1 0</normal>
+              <size>40 40</size>
+            </plane>
+          </geometry>
+        </collision>
+      </link>
+    </model>
+
+    <!-- Sensor Primer Link to prevent IMU race -->
+    <model name="sensor_primer">
+      <static>true</static>
+      <pose>0 0 200 0 0 0</pose>
+      <link name="primer_link">
+        <inertial>
+          <mass>0.1</mass>
+          <inertia>
+            <ixx>0.001</ixx><ixy>0</ixy><ixz>0</ixz>
+            <iyy>0.001</iyy><iyz>0</iyz><izz>0.001</izz>
+          </inertia>
+        </inertial>
+        <sensor name="primer_imu" type="imu">
+          <always_on>1</always_on>
+          <update_rate>10</update_rate>
+          <topic>sensor_primer/imu</topic>
+        </sensor>
+      </link>
+    </model>
+  </world>
+</sdf>
+SDFEOF
+EOF
