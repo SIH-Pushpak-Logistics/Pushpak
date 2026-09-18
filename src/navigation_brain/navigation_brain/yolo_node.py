@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
-"""Victim detection node. Publishes to detections:{drone_id}.
-
-RAUNAK: everything except run_inference() is done. Fill in that one method.
-Contract: docs/STREAM_CONTRACTS.md
-"""
+"""Victim detection node. Publishes to detections:{drone_id}."""
 import os
-
+import cv2
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import PoseStamped
 from cv_bridge import CvBridge, CvBridgeError
 from rclpy.qos import qos_profile_sensor_data
-import cv2
 
 from swarm_utils.redis_bridge import RedisTelemetryPublisher
 
@@ -24,13 +19,15 @@ class YoloNode(Node):
         super().__init__('yolo_node')
 
         self.declare_parameter('drone_id', 'drone_00')
-        self.declare_parameter('model_path', 'yolov8n.pt')
+        self.declare_parameter('model_path', '/workspace/yolov8n.pt')
         self.declare_parameter('confidence', 0.4)
         self.declare_parameter('max_rate_hz', 1.5)
+
         self.drone_id = self.get_parameter('drone_id').get_parameter_value().string_value
         self.model_path = self.get_parameter('model_path').get_parameter_value().string_value
         self.conf_threshold = self.get_parameter('confidence').get_parameter_value().double_value
-        self.min_interval = 1.0 / self.get_parameter('max_rate_hz').get_parameter_value().double_value
+        rate = self.get_parameter('max_rate_hz').get_parameter_value().double_value
+        self.min_interval = 1.0 / max(rate, 0.1)
 
         os.makedirs(DETECTION_DIR, exist_ok=True)
 
@@ -62,75 +59,56 @@ class YoloNode(Node):
         self.drone_y = msg.pose.position.y
         self.drone_z = msg.pose.position.z
 
-    # ------------------------------------------------------------------
-    # RAUNAK: these two methods are yours.
-    # ------------------------------------------------------------------
     def load_model(self):
-    try:
-        import torch
-        torch.set_num_threads(2)
-        from ultralytics import YOLO
-            model = YOLO(self.model_path)
-            self.get_logger().info(f'loaded model {self.model_path}')
+        try:
+            import torch
+            torch.set_num_threads(2)
+            from ultralytics import YOLO
+
+            path = self.model_path
+            if not os.path.isabs(path) and not os.path.exists(path):
+                path = os.path.join('/workspace', path)
+
+            model = YOLO(path)
+            self.get_logger().info(f'loaded model {path} (CPU threads=2)')
             return model
         except Exception as exc:
             self.get_logger().error(f'model load failed: {exc}. Running in NO-OP mode.')
             return None
 
     def run_inference(self, frame):
-        """Return raw person detections in the stream contract format.
-
-        {'class_name': 'person', 'confidence': float,
-         'bbox': (x, y, w, h)}
-
-        Coordinates are pixels with a top-left origin.
-        Returns [] on any inference/parsing failure and never raises.
-        """
         if self.model is None:
             return []
-
         try:
             results = self.model(frame, imgsz=320, verbose=False)
             out = []
-
             for result in results:
                 names = result.names
-
                 for box in result.boxes:
                     conf = float(box.conf[0])
-
                     if conf < self.conf_threshold:
                         continue
 
                     class_id = int(box.cls[0])
                     class_name = names[class_id]
-
                     if class_name != 'person':
                         continue
 
-                    x1, y1, x2, y2 = (
-                        float(value) for value in box.xyxy[0]
-                    )
-
-                    width = x2 - x1
-                    height = y2 - y1
-
-                    if width <= 0 or height <= 0:
+                    x1, y1, x2, y2 = (float(v) for v in box.xyxy[0])
+                    w = x2 - x1
+                    h = y2 - y1
+                    if w <= 0 or h <= 0:
                         continue
 
                     out.append({
                         'class_name': 'person',
                         'confidence': conf,
-                        'bbox': (x1, y1, width, height),
+                        'bbox': (x1, y1, w, h),
                     })
-
             return out
-
         except Exception as exc:
             self.get_logger().warn(f'inference failed: {exc}')
             return []
-
-    # ------------------------------------------------------------------
 
     def image_cb(self, msg: Image):
         stamp_sec = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
