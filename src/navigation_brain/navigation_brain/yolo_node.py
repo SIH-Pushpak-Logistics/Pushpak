@@ -48,7 +48,7 @@ class YoloNode(Node):
         self.create_subscription(
             Image, '/camera/image_raw', self.image_cb, qos_profile_sensor_data)
         self.create_subscription(
-            PoseStamped, '/mavros/local_position/pose', self.pose_cb, 10)
+            PoseStamped, '/mavros/local_position/pose', self.pose_cb, qos_profile_sensor_data)
 
         self.get_logger().info(
             f'yolo_node active: conf>={self.conf_threshold}, '
