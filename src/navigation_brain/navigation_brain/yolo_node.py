@@ -26,7 +26,7 @@ class YoloNode(Node):
         self.declare_parameter('drone_id', 'drone_00')
         self.declare_parameter('model_path', 'yolov8n.pt')
         self.declare_parameter('confidence', 0.4)
-        self.declare_parameter('max_rate_hz', 5.0)
+        self.declare_parameter('max_rate_hz', 1.5)
         self.drone_id = self.get_parameter('drone_id').get_parameter_value().string_value
         self.model_path = self.get_parameter('model_path').get_parameter_value().string_value
         self.conf_threshold = self.get_parameter('confidence').get_parameter_value().double_value
@@ -66,8 +66,10 @@ class YoloNode(Node):
     # RAUNAK: these two methods are yours.
     # ------------------------------------------------------------------
     def load_model(self):
-        try:
-            from ultralytics import YOLO
+    try:
+        import torch
+        torch.set_num_threads(2)
+        from ultralytics import YOLO
             model = YOLO(self.model_path)
             self.get_logger().info(f'loaded model {self.model_path}')
             return model
@@ -88,7 +90,7 @@ class YoloNode(Node):
             return []
 
         try:
-            results = self.model(frame, verbose=False)
+            results = self.model(frame, imgsz=320, verbose=False)
             out = []
 
             for result in results:
