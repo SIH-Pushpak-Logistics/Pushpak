@@ -55,7 +55,7 @@ class LinkMonitorNode(Node):
             self.drone_id, now,
             state=self.state,
             cached_packets=self.cached,
-            last_sync_sec=float(self.last_sync),
+            last_sync_sec=float(0.0 if self.state == "ONLINE" else (now - self.last_sync)),
             rssi_dbm=float(rssi))
 
 

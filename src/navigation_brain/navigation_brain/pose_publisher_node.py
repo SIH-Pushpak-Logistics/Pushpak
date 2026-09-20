@@ -4,6 +4,7 @@ import math
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped
+from rclpy.qos import qos_profile_sensor_data
 
 from swarm_utils.redis_bridge import RedisTelemetryPublisher
 
@@ -24,7 +25,7 @@ class PosePublisherNode(Node):
 
         self.latest = None
         self.create_subscription(
-            PoseStamped, '/mavros/local_position/pose', self.pose_cb, 10)
+            PoseStamped, '/mavros/local_position/pose', self.pose_cb, qos_profile_sensor_data)
         self.create_timer(1.0 / rate, self.tick)
         self.get_logger().info(
             f'pose_publisher active at {rate:.1f} Hz -> telemetry:{self.drone_id}:pose')

@@ -74,3 +74,8 @@ repomix-output.xml
 logs/
 figs/*.png
 detections/
+
+# debug artifacts
+live_view.jpg
+detections/
+sitl_run.log

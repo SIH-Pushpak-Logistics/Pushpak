@@ -1,9 +1,12 @@
 mavros:
   ros__parameters:
+    plugin_denylist:
+      - distance_sensor
     system_id: 255
     component_id: 1
     target_system_id: 1
     target_component_id: 1
+  
 
     # --- Coordinate Frame Enforcement ---
     setpoint_velocity:

@@ -29,13 +29,11 @@ class AltimeterNode(Node):
         if not msg.ranges:
             return
         z = msg.ranges[0]
-        
-        # Only clamp to 0.05m if reading is below range_min (on physical skids).
-        # If the beam missed completely (inf/nan), do not fake a landed altitude.
-        if math.isnan(z):
+
+        if math.isnan(z) or math.isinf(z) or z <= 0.0:
             return
-        if math.isinf(z) or z <= 0.0 or z < msg.range_min:
-            z = 0.05
+        if z < msg.range_min:
+            z = msg.range_min
         elif z > msg.range_max:
             z = msg.range_max
 
