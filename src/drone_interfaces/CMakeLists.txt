@@ -8,12 +8,13 @@ endif()
 # Find Core Build Tools
 find_package(ament_cmake REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 # Generate the C++ and Python bindings for your custom message
 rosidl_generate_interfaces(${PROJECT_NAME}
-  "msg/OpticalFlow.msg"
-  DEPENDENCIES std_msgs
+  "msg/SurvivorDetection.msg"
+  DEPENDENCIES std_msgs geometry_msgs
 )
 
 ament_package()
