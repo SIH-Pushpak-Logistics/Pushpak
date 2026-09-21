@@ -79,3 +79,8 @@ detections/
 live_view.jpg
 detections/
 sitl_run.log
+
+# v2 session artifacts
+live_*.jpg
+bags/
+.worktrees/

@@ -1,0 +1,31 @@
+syntax = "proto3";
+package swarm.telemetry;
+
+message SubMapKeyframe {
+  uint32 timestamp_ms = 1;
+  uint32 drone_id     = 2;
+  sint32 pos_x_mm     = 3;
+  sint32 pos_y_mm     = 4;
+  sint32 pos_z_mm     = 5;
+  sint32 roll_cdeg    = 6;
+  sint32 pitch_cdeg   = 7;
+  sint32 yaw_cdeg     = 8;
+  uint32 status_flags = 9;
+}
+
+message SurvivorEvent {
+  uint32 timestamp_ms   = 1;
+  uint32 drone_id       = 2;
+  uint32 survivor_id    = 3;
+  sint32 pos_x_mm       = 4;
+  sint32 pos_y_mm       = 5;
+  sint32 pos_z_mm       = 6;
+  uint32 confidence_pct = 7;
+  uint32 hit_count      = 8;
+}
+
+message Heartbeat {
+  uint32 timestamp_ms = 1;
+  uint32 drone_id     = 2;
+  uint32 status_flags = 3;
+}
