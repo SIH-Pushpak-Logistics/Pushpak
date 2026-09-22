@@ -79,6 +79,7 @@ GUIDANCE
   arm_takeoff_handshake.py   GUIDED -> arm -> takeoff 1.5 m
                              -> /pushpak/airborne (latched Bool)
                              then stays alive as FS-4 watchdog
+  # Note: Camera points strictly downward (rpy 0 1.570796 0); odom z is height above ground by definition.
   pushpak_brain (Rust) @20Hz, starts on /pushpak/airborne == true
     keyframe FIFO (5 Hz sample, 200 poses)
     exploration waypoint list -> P follower -> clamps -> failsafes
@@ -128,6 +129,7 @@ and feeding it to `robot_localization` closes a yaw feedback loop through ExtNav
 | Topic | Type | Only allowed consumer |
 |---|---|---|
 | `/sim/ground_truth/odom` | `nav_msgs/Odometry` | `sim_radar_emulator_node`, offline evaluation bags |
+| `/sim/fault/radar` | `std_msgs/Bool` | `sim_radar_emulator_node` (operator-injected fault to trigger FS-3) |
 
 ### Simulation ↔ hardware producers
 Consumers are identical on every platform. Only the producer changes (I-8).
@@ -308,7 +310,7 @@ Evaluated in `pushpak_brain` at 20 Hz in this priority order. First match wins.
 | Priority | Failsafe | Trigger | Action |
 |---|---|---|---|
 | 1 | **FS-5 FCU rejection** | MAVROS mode ≠ GUIDED, or disarmed, while airborne | Stop publishing, log, never fight the FCU. |
-| 2 | **FS-3 Topological backtrack** | Visual covariance ≥ 1e6 **and** `Tr(Σ_v)` of `/odometry/filtered` > `backtrack_cov_threshold` | Abort exploration. Reverse the keyframe FIFO at ≤ 1.0 m/s, acceptance sphere 0.4 m, until the visual baseline returns or any peer is heard. |
+| 2 | **FS-3 Topological backtrack** | Visual covariance ≥ 1e6 **and** `Tr(Σ_v)` of `/odometry/filtered` > `backtrack_cov_threshold` (Note: Dust alone cannot trigger FS-3; radar loss is an injected fault via `/sim/fault/radar`) | Abort exploration. Reverse the keyframe FIFO at ≤ 1.0 m/s, acceptance sphere 0.4 m, until the visual baseline returns or any peer is heard. |
 | 3 | **FS-2 Isolated** | No heartbeat from **any** other peer, ground station included, for > 2.0 s | Halt exploration and hold (zero velocity). Set bit 4. |
 | 4 | **FS-1 Visual dropout** | Visual covariance ≥ 1e6 | Continue on radar-inertial. Clear bit 0. |
 | — | **FS-4 Guidance liveness** | `arm_takeoff_handshake.py` sees no `cmd_vel` for > 1.0 s after airborne | Sidecar commands `SetMode LAND`. Lives outside `pushpak_brain` because it covers `pushpak_brain` dying. |
@@ -358,7 +360,7 @@ threshold itself. `RNGFND1_MAX_CM 400` matches a VL53L1X-class ToF; the Gazebo l
 | Path | Owner |
 |---|---|
 | `Dockerfile`, `docker-compose.yml`, all `launch/`, `bridge.yaml`, `setup.py`, `package.xml`, `CMakeLists.txt` | Ashutosh — sole editor. Others request changes in their PR description. |
-| `src/navigation_brain/.../altimeter_node.py`, `sim_radar_emulator_node.py`, `vio_bridge_node.py`, `config/ekf_15state.yaml`, `tools/arm_takeoff_handshake.py`, `src/pushpak_brain/`, `firmware/` | Ashutosh |
+| `src/navigation_brain/.../altimeter_node.py`, `sim_radar_emulator_node.py`, `vio_bridge_node.py`, `config/ekf_15state.yaml`, `src/navigation_brain/navigation_brain/arm_takeoff_handshake.py`, `src/pushpak_brain/`, `firmware/` | Ashutosh |
 | `src/navigation_brain/.../perception_node.py` | Raunak |
 | `proto/pushpak.proto` (frozen), `src/pushpak_telemetry/`, `src/pushpak_peer/`, `hitl/` | Kanishk |
 | `src/drone_description/worlds/collapse.sdf`, `meshes/collapse/`, `tools/zenoh_gateway.py`, `dashboard/` | Aditya |
