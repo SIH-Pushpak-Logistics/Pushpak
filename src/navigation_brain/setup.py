@@ -23,19 +23,12 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'vision_nav_node = navigation_brain.vision_nav_node:main',
-            'state_machine_node = navigation_brain.state_machine_node:main',
-            'vio_bridge_node = navigation_brain.vio_bridge_node:main',
-            'gazebo_odom_adapter_node = navigation_brain.gazebo_odom_adapter_node:main',
-            'sim_vio_node = navigation_brain.sim_vio_node:main',
-            'landing_state_node = navigation_brain.landing_state_node:main',
-            'anti_sway_filter = navigation_brain.anti_sway_filter:main',
             'altimeter_node = navigation_brain.altimeter_node:main',
-            'mission_node = navigation_brain.mission_node:main',
+            'perception_node = navigation_brain.perception_node:main',
+            'sim_radar_emulator_node = navigation_brain.sim_radar_emulator_node:main',
+            'vio_bridge_node = navigation_brain.vio_bridge_node:main',
+            'vision_nav_node = navigation_brain.vision_nav_node:main',
             'yolo_node = navigation_brain.yolo_node:main',
-            'pose_publisher_node = navigation_brain.pose_publisher_node:main',
-            'link_monitor_node = navigation_brain.link_monitor_node:main',
-            'commander_node = navigation_brain.commander_node:main',
         ],
     },
 )
