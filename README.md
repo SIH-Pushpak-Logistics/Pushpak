@@ -20,8 +20,9 @@ native `zenoh` Rust crate in peer mode · Protobuf via `prost` ·
 Python gateway → React dashboard.
 
 **Out of scope, by decision:** PX4, Micro XRCE-DDS, Gazebo Classic, ROS 2 Jazzy, Redis,
-`zenoh-pico`, `zenohd` routers, wind/downwash/ground-effect/Coanda modelling, Doppler
-ray tracing, airframe re-tuning, the Flood world.
+`zenoh-pico`, `zenohd` routers, LoRa telemetry (not an IP link; Zenoh cannot use it),
+wind/downwash/ground-effect/Coanda modelling, Doppler ray tracing, airframe re-tuning,
+the Flood world.
 
 ---
 
@@ -128,6 +129,22 @@ and feeding it to `robot_localization` closes a yaw feedback loop through ExtNav
 |---|---|---|
 | `/sim/ground_truth/odom` | `nav_msgs/Odometry` | `sim_radar_emulator_node`, offline evaluation bags |
 
+### Simulation ↔ hardware producers
+Consumers are identical on every platform. Only the producer changes (I-8).
+
+| Topic | Simulation | Desk rig | Drone B (design target) |
+|---|---|---|---|
+| `/camera/image_raw`, `/camera/camera_info` | Gazebo bridge | `usb_cam` | `usb_cam` |
+| `/imu/raw` | Gazebo `ros_imu` via bridge | FC `/mavros/imu/data_raw`, remapped | FC `/mavros/imu/data_raw`, remapped |
+| `/radar/ego_velocity` | `sim_radar_emulator_node` | `radar_ego_velocity_node` | `radar_ego_velocity_node` |
+| `/drone/tof_range`, `/ekf/altitude_pose` | `altimeter_node` from bridged LaserScan | not used (hand-carried) | `altimeter_node` from MAVROS rangefinder output |
+
+- Never use `/mavros/imu/data` as `/imu/raw` on any platform: its orientation is the FC's estimate (see §6).
+- `/mavros/imu/data_raw` carries no orientation. On the desk rig, `imu0` fuses rates only
+  (roll, pitch, yaw all false) and accelerations stay off.
+- Drone B needs MAVROS's rangefinder/distance-sensor plugin enabled; v0.1's
+  `apm_config.yaml` denylists `distance_sensor`.
+
 ### Estimation bus
 | Topic | Type | Producer | Rate |
 |---|---|---|---|
@@ -144,6 +161,16 @@ altitude as a Z-only pose for that reason.
 | Topic | Type | Producer | Rate |
 |---|---|---|---|
 | `/detections/survivor` | `drone_interfaces/SurvivorDetection` | `perception_node` | ≤ 2 Hz |
+
+`perception_node` is one node on every platform. Platform differences are parameters, never forks:
+
+| Parameter | Type | Default | Notes |
+|---|---|---|---|
+| `model_path` | string | `/workspace/yolov8n.pt` | `.pt` or a TensorRT `.engine`. Engines are built on the target device. |
+| `device` | string | `cuda:0` | `cpu` allowed for bench tests |
+| `imgsz` | int | 320 | |
+| `conf_threshold` | double | 0.85 | |
+| `max_rate_hz` | double | 2.0 | Pipeline B only |
 
 ### Guidance and actuation
 | Topic | Type | Producer |
@@ -397,6 +424,10 @@ State these before judges find them.
 5. **No aerodynamic environment.** Wind, downwash, ground effect, wall suction: out of
    scope by decision.
 6. **The v0.1 fallback** navigates on ground-truth ExtNav and is labelled as such.
+7. **No flight hardware is built.** Hardware evidence is a hand-carried desk rig: Jetson Orin
+   Nano, USB camera, an unarmed ArduPilot FC as IMU, and optionally an IWR6843 radar. Drone B
+   is a design target: estimated 600–760 g all-up and 5–7 minutes' endurance. Sub-GHz HaLow
+   is a design target; the rig uses a standard Wi-Fi router.
 
 ---
 
@@ -408,3 +439,5 @@ State these before judges find them.
 | Radar noise, bias and bias random-walk values with citations | Ashutosh | Day 2 |
 | Laplacian-variance dust threshold | Raunak | Day 3 |
 | `backtrack_cov_threshold` | Ashutosh | Day 4 (hover gate) |
+| Hardware inventory and rig tier (1/2/3) | Kanishk | Day 1 |
+| HaLow channel-plan legality in India (design target) | Kanishk | before the deck freezes |
