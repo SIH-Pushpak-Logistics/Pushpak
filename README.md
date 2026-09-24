@@ -15,9 +15,27 @@ with a written removal gate.
 ## 1. Frozen Stack
 
 ArduPilot SITL Copter-4.4 (`865cffa5`) · Gazebo Harmonic · ROS 2 Humble ·
-`robot_localization` 15-state EKF · Rust (`ros2_rust`) guidance node ·
+`robot_localization` 15-state EKF · Python (`rclpy`) guidance node ·
 native `zenoh` Rust crate in peer mode · Protobuf via `prost` ·
 Python gateway → React dashboard.
+
+**Guidance language (decided Day 2).** The rclrs tripwire fired: `pushpak_brain` had not
+compiled against `rclrs` in the container by end of Day 2. `pushpak_brain` is Python with
+the identical topic and parameter contract. Rust ships in `pushpak_telemetry` and
+`pushpak_peer`. Guidance maths lives in pure functions with no ROS imports, testable
+without ROS.
+
+**Container pins** (`Dockerfile`, verified on RTX 3050 6 GB Laptop, driver 580.178.04):
+base `ros:humble-ros-base@sha256:1813d3c85d7f96ff7d3012d865204583255740182db5d0065f8f8cd029a83138` ·
+ROS apt snapshot `snapshots.ros.org/humble/2026-08-07` (the live Humble index dropped
+`ros-humble-mavros`, mavlink/mavros#2293) · MAVROS 2.14.0 binary · ros_gz `28e586a3` ·
+ardupilot_gazebo `082a0fe231f6e63bc8d1598f1cba461d9e2ea7f5` · torch 2.13.0+cu126 ·
+torchvision 0.28.0+cu126 · ultralytics 8.4.155 · numpy 1.26.4 (`<2`) · protobuf 3.20.3 ·
+rustc 1.98.1 (observed; pinned at next Dockerfile change) · setuptools 59.6.0 from apt,
+asserted at build time — never pip-install or upgrade it. No Redis in the v2 image.
+Build hosts run Docker with `"features": {"containerd-snapshotter": false}`; the
+containerd image store keeps each image about three times and does not fit an 80 GB
+partition.
 
 **Out of scope, by decision:** PX4, Micro XRCE-DDS, Gazebo Classic, ROS 2 Jazzy, Redis,
 `zenoh-pico`, `zenohd` routers, LoRa telemetry (not an IP link; Zenoh cannot use it),
@@ -80,7 +98,7 @@ GUIDANCE
                              -> /pushpak/airborne (latched Bool)
                              then stays alive as FS-4 watchdog
   # Note: Camera points strictly downward (rpy 0 1.570796 0); odom z is height above ground by definition.
-  pushpak_brain (Rust) @20Hz, starts on /pushpak/airborne == true
+  pushpak_brain (Python) @20Hz, starts on /pushpak/airborne == true
     keyframe FIFO (5 Hz sample, 200 poses)
     exploration waypoint list -> P follower -> clamps -> failsafes
     survivor dedup (1.5 m radius)
@@ -425,7 +443,9 @@ State these before judges find them.
    filter believes it has been.
 5. **No aerodynamic environment.** Wind, downwash, ground effect, wall suction: out of
    scope by decision.
-6. **The v0.1 fallback** navigates on ground-truth ExtNav and is labelled as such.
+6. **The v0.1 fallback** navigates on ground-truth ExtNav and is labelled as such. It can
+   no longer be rebuilt from its Dockerfile (upstream withdrew the Humble MAVROS binaries);
+   the recorded demo is the artefact.
 7. **No flight hardware is built.** Hardware evidence is a hand-carried desk rig: Jetson Orin
    Nano, USB camera, an unarmed ArduPilot FC as IMU, and optionally an IWR6843 radar. Drone B
    is a design target: estimated 600–760 g all-up and 5–7 minutes' endurance. Sub-GHz HaLow
@@ -443,3 +463,5 @@ State these before judges find them.
 | `backtrack_cov_threshold` | Ashutosh | Day 4 (hover gate) |
 | Hardware inventory and rig tier (1/2/3) | Kanishk | Day 1 |
 | HaLow channel-plan legality in India (design target) | Kanishk | before the deck freezes |
+| `pushpak_brain` Python skeleton: zero-velocity hold, full topic/param contract. Required by the Phase 3 hover gate: with no `cmd_vel` writer, FS-4 lands the vehicle 1 s after airborne | Ashutosh | Day 3 |
+| Pin rustc 1.98.1 in `Dockerfile`; delete build dirs in the same layer to shrink the image | Ashutosh | next Dockerfile change |
