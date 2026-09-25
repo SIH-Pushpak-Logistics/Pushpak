@@ -31,19 +31,6 @@ set +u
 . /workspace/install/setup.bash
 set -u
 
-export LP_NUM_THREADS="${LP_NUM_THREADS:-2}"
-
-redis-server --daemonize yes >/dev/null 2>&1
-if ! redis-cli PING >/dev/null 2>&1; then
-    echo "[launch_sim] FATAL: redis-server not responding on 6379." >&2
-    exit 3
-fi
-
-for pat in "telemetry:${DRONE_ID}:*" "swarm:${DRONE_ID}:*" "emergency_override:${DRONE_ID}"; do
-    redis-cli --scan --pattern "$pat" | xargs -r redis-cli DEL >/dev/null
-done
-echo "[launch_sim] cleared stale Redis keys for ${DRONE_ID}"
-
 if ! command -v ros2 >/dev/null 2>&1; then
     echo "[launch_sim] FATAL: ros2 not on PATH after sourcing setup files." >&2
     exit 3

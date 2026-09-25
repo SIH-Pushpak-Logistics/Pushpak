@@ -1,3 +1,5 @@
+> **Historical — v0.1 only.** Describes the v0.1 architecture, which fed ExtNav from Gazebo ground truth via `gazebo_odom_adapter_node`. Superseded by `README.md` on `arch/v2-degraded-estimation`. Nothing here is a v2 contract.
+
 Autonomous GPS-Denied Aerial Navigation Architecture: Estimator Fusion, Coordinate Topology, and Flight Control Substrate1. Architectural Philosophy: The Decoupled Brain-Muscle ParadigmAutonomous micro-aerial vehicles (UAVs) operating in GPS-denied subterranean, tactical, or disaster environments face a foundational systems engineering challenge: the strict decoupling of high-latency, probabilistic perception algorithms from deterministic, high-bandwidth flight stabilization loops.+-------------------------------------------------------------------------------+
 |                       HIGH-LEVEL AUTONOMY (The "Brain")                       |
 |          NVIDIA Jetson Orin Nano / ROS 2 Humble (Non-Real-Time Linux)         |

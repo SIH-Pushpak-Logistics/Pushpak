@@ -26,7 +26,7 @@ def generate_launch_description():
     brain_nodes = [
         Node(package='navigation_brain', executable=exe, name=exe,
              output='screen', parameters=[common])
-        for exe in ['altimeter_node', 'vision_nav_node', 'yolo_node']
+        for exe in ['altimeter_node']
     ]
 
     return LaunchDescription([bridge_node] + brain_nodes)
