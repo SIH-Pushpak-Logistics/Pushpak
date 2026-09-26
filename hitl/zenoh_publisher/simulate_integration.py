@@ -168,7 +168,9 @@ def main():
         wait_for(output, 'SURVIVOR peer=2 id=1 confidence=87pct')
         print('PASS: fake ROS detection -> adapter -> Rust protobuf -> Zenoh -> peer')
 
-        odometry = SimpleNamespace(pose=SimpleNamespace(pose=SimpleNamespace(
+        odometry = SimpleNamespace(
+            header=SimpleNamespace(stamp=SimpleNamespace(sec=12, nanosec=345_000_000)),
+            pose=SimpleNamespace(pose=SimpleNamespace(
             position=SimpleNamespace(x=2.0, y=-0.5, z=1.5),
             orientation=SimpleNamespace(x=0.0, y=0.0,
                                         z=math.sin(math.pi / 4),
@@ -185,13 +187,14 @@ def main():
             except queue.Empty:
                 continue
             print(line)
-            if 'KEYFRAME peer=2' in line and 'pos=(2000,-500,1500)' in line:
+            if ('KEYFRAME peer=2 t_ms=12345' in line
+                    and 'pos=(2000,-500,1500)' in line):
                 break
         else:
-            raise TimeoutError('odometry pose did not reach the peer')
+            raise TimeoutError('odometry pose and header timestamp did not reach the peer')
         with send_lock:
             adapter.pose_source = 'mock'
-        print('PASS: odometry launch mode sends the filtered pose')
+        print('PASS: odometry keyframe uses the filtered pose and header stamp')
 
         ground = subprocess.Popen(
             [str(PEER_BINARY), '--drone-id', '0', '--keyframes', str(KEYFRAMES),

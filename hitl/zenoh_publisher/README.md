@@ -66,8 +66,11 @@ travel-router network when it does not. The named peer at that address must
 listen with `--listen tcp/0.0.0.0:7447`. `drone_id` is fixed to `2` by the
 contract. `/detections/survivor` generates `SurvivorEvent` on each detection,
 with nearby detections grouped into a stable `survivor_id` and increasing
-`hit_count`. Heartbeats run at 2 Hz and keyframes at 5 Hz. Timestamps come
-from the ROS clock (so set `use_sim_time` correctly for the running platform).
+`hit_count`. Heartbeats run at 2 Hz and keyframes at 5 Hz. Survivor events use
+the detection header stamp. Odometry keyframes use the odometry header stamp;
+the timer does not replace it with process uptime. Heartbeats and fixed mock
+poses have no source header, so they use the ROS clock. Set `use_sim_time`
+correctly for the running platform.
 
 ## Tier 3: odometry pose
 

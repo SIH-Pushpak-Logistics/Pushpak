@@ -1,10 +1,20 @@
 import math
 import unittest
+from types import SimpleNamespace
 
-from conversion import SurvivorTracker, confidence_percent, millimetres, quaternion_rpy_cdeg
+from conversion import (
+    SurvivorTracker, confidence_percent, millimetres, quaternion_rpy_cdeg,
+    timestamp_ms_from_stamp,
+)
 
 
 class ConversionTest(unittest.TestCase):
+    def test_ros_header_stamp_milliseconds(self):
+        self.assertEqual(timestamp_ms_from_stamp(
+            SimpleNamespace(sec=12, nanosec=345_999_999)), 12_345)
+        self.assertEqual(timestamp_ms_from_stamp(
+            SimpleNamespace(sec=4_294_968, nanosec=0)), 704)
+
     def test_units_and_orientation(self):
         self.assertEqual(millimetres(1.25), 1250)
         q = (0, 0, math.sin(math.pi/4), math.cos(math.pi/4))

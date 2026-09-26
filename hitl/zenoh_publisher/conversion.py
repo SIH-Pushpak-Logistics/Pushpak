@@ -3,6 +3,11 @@
 import math
 
 
+def timestamp_ms_from_stamp(stamp):
+    """Convert a ROS message header stamp to the frozen uint32 millisecond field."""
+    return (stamp.sec * 1000 + stamp.nanosec // 1_000_000) & 0xffffffff
+
+
 def millimetres(metres):
     if not math.isfinite(metres):
         raise ValueError("position must be finite")

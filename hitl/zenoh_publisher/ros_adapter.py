@@ -14,7 +14,7 @@ from nav_msgs.msg import Odometry
 
 from conversion import (
     SurvivorTracker, centidegrees, confidence_percent, millimetres,
-    quaternion_rpy_cdeg,
+    quaternion_rpy_cdeg, timestamp_ms_from_stamp,
 )
 
 
@@ -67,8 +67,8 @@ class RosZenohAdapter(Node):
         self.create_timer(0.2, self.send_keyframe)
         self.get_logger().info(f'HITL Zenoh adapter running: pose_source={self.pose_source}')
 
-    def timestamp_ms(self):
-        # The ROS clock respects use_sim_time; all three messages use one clock.
+    def clock_timestamp_ms(self):
+        # Heartbeats and mock poses have no source message header.
         return (self.get_clock().now().nanoseconds // 1_000_000) & 0xffffffff
 
     def send(self, message):
@@ -81,7 +81,7 @@ class RosZenohAdapter(Node):
             raise RuntimeError('Rust Zenoh peer closed its input') from exc
 
     def send_heartbeat(self):
-        self.send({'kind': 'heartbeat', 'timestamp_ms': self.timestamp_ms(),
+        self.send({'kind': 'heartbeat', 'timestamp_ms': self.clock_timestamp_ms(),
                    'status_flags': self.status_flags})
 
     def on_odometry(self, message):
@@ -91,6 +91,7 @@ class RosZenohAdapter(Node):
         if self.pose_source == 'odometry':
             if self.latest_odom is None:
                 return  # Do not present a mock pose as real odometry.
+            timestamp_ms = timestamp_ms_from_stamp(self.latest_odom.header.stamp)
             pose = self.latest_odom.pose.pose
             xyz = (pose.position.x, pose.position.y, pose.position.z)
             q = pose.orientation
@@ -100,6 +101,7 @@ class RosZenohAdapter(Node):
                 self.get_logger().warning(str(exc))
                 return
         else:
+            timestamp_ms = self.clock_timestamp_ms()
             xyz = self.mock[:3]
             roll, pitch, yaw = 0, 0, round(self.mock[3] * 100)
         try:
@@ -107,7 +109,7 @@ class RosZenohAdapter(Node):
         except ValueError as exc:
             self.get_logger().warning(str(exc))
             return
-        self.send({'kind': 'keyframe', 'timestamp_ms': self.timestamp_ms(),
+        self.send({'kind': 'keyframe', 'timestamp_ms': timestamp_ms,
                    'pos_x_mm': x, 'pos_y_mm': y, 'pos_z_mm': z,
                    'roll_cdeg': roll, 'pitch_cdeg': pitch, 'yaw_cdeg': yaw,
                    'status_flags': self.status_flags})
@@ -122,8 +124,7 @@ class RosZenohAdapter(Node):
         except ValueError as exc:
             self.get_logger().warning(f'ignored invalid survivor detection: {exc}')
             return
-        stamp = message.header.stamp
-        timestamp_ms = (stamp.sec * 1000 + stamp.nanosec // 1_000_000) & 0xffffffff
+        timestamp_ms = timestamp_ms_from_stamp(message.header.stamp)
         self.status_flags |= 1 << 2  # Survivor_Found, per README §8.
         self.send({'kind': 'survivor', 'timestamp_ms': timestamp_ms,
                    'survivor_id': survivor_id, 'pos_x_mm': x, 'pos_y_mm': y,
