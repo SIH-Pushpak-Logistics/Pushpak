@@ -1638,6 +1638,7 @@ dependencies = [
  "protoc-bin-vendored",
  "serde_json",
  "thiserror 1.0.69",
+ "tokio",
  "zenoh",
  "zenoh-buffers",
  "zenoh-codec",
