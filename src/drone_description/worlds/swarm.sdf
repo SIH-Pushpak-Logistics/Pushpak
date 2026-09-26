@@ -83,7 +83,7 @@
 
     <model name="victim_01">
       <static>true</static>
-      <pose>0.35 0.15 0.02 0 0 0.6</pose>
+      <pose>0.35 0.15 0.002 0 0 0.6</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
@@ -109,7 +109,7 @@
 
     <model name="victim_02">
       <static>true</static>
-      <pose>-1.5 1.8 0.02 0 0 2.1</pose>
+      <pose>-1.5 1.8 0.002 0 0 2.1</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
@@ -135,7 +135,7 @@
 
     <model name="victim_03">
       <static>true</static>
-      <pose>2.2 -1.6 0.02 0 0 -1.2</pose>
+      <pose>2.2 -1.6 0.002 0 0 -1.2</pose>
       <link name="link">
         <visual name="visual">
           <geometry>

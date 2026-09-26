@@ -20,6 +20,22 @@
     <collision>
       <geometry><box size="0.4 0.4 0.1"/></geometry>
     </collision>
+    <collision name="leg_fl">
+      <origin xyz="0.15 0.15 -0.11" rpy="0 0 0"/>
+      <geometry><box size="0.02 0.02 0.12"/></geometry>
+    </collision>
+    <collision name="leg_fr">
+      <origin xyz="0.15 -0.15 -0.11" rpy="0 0 0"/>
+      <geometry><box size="0.02 0.02 0.12"/></geometry>
+    </collision>
+    <collision name="leg_rl">
+      <origin xyz="-0.15 0.15 -0.11" rpy="0 0 0"/>
+      <geometry><box size="0.02 0.02 0.12"/></geometry>
+    </collision>
+    <collision name="leg_rr">
+      <origin xyz="-0.15 -0.15 -0.11" rpy="0 0 0"/>
+      <geometry><box size="0.02 0.02 0.12"/></geometry>
+    </collision>
   </link>
 
   <link name="camera_link">

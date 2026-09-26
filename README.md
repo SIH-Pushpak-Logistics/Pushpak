@@ -363,13 +363,13 @@ RNGFND1_TYPE     100
 RNGFND1_MIN_CM   10
 RNGFND1_MAX_CM   400
 RNGFND1_ORIENT   25
-RNGFND1_GNDCLEAR 10
+RNGFND1_GNDCLEAR 12
 
 ARMING_CHECK     1
 ```
 `EK3_CHECK_SCALE` default is 100; 200 is the loosened gate. `FS_EKF_THRESH` is the trip
 threshold itself. `RNGFND1_MAX_CM 400` matches a VL53L1X-class ToF; the Gazebo lidar
-`<max>` is 4.0 to agree. Mass, inertia, `ATC_*`, `MOT_THST_EXPO` and all eight
+`<max>` is 4.0 to agree. `RNGFND1_GNDCLEAR 12` is the ToF reading when landed: collision-only landing legs hold the sensor 0.12 m up, as Drone B's landing gear would, and EKF3 floors every range reading at this value. Mass, inertia, `ATC_*`, `MOT_THST_EXPO` and all eight
 `LiftDrag` blocks stay at v0.1 values; the Cinewhoop change is a visual mesh only.
 
 ---
@@ -494,8 +494,7 @@ path. Inputs are radar and IMU only; `/visual/velocity` does not exist yet, whic
 harder case.
 
 **Arming order** (`arm_takeoff_handshake.py`): `robot_localization` publishing →
-`vio_bridge_node` streaming ExtNav → origin and home accepted → `/mavros/estimator_status`
-reports horizontal velocity and horizontal relative position OK → GUIDED → arm → takeoff
+`vio_bridge_node` streaming ExtNav → origin and home accepted → `/mavros/local_position/pose` streaming (ArduPilot sends local position only once it has both a position and a velocity estimate) → GUIDED and arm, retried every 2 s until the flight controller accepts; ArduPilot's own pre-arm checks are the readiness authority, and it never sends `ESTIMATOR_STATUS` → takeoff
 1.5 m → `/pushpak/airborne` → FS-4 armed. Every `/mavros/statustext/recv` message during
 the handshake is logged. A pre-arm refusal is fixed at its cause; `ARMING_CHECK` stays 1.
 
