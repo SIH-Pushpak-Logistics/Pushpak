@@ -84,3 +84,8 @@ sitl_run.log
 live_*.jpg
 bags/
 .worktrees/
+
+# Rust build outputs; keep the peer's checked-in replay fixture.
+target/
+!src/pushpak_peer/testdata/
+!src/pushpak_peer/testdata/keyframes.csv

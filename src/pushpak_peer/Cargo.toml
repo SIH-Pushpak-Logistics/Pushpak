@@ -1,0 +1,10 @@
+[package]
+name = "pushpak_peer"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+pushpak_telemetry = { path = "../pushpak_telemetry" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time", "fs"] }
