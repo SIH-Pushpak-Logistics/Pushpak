@@ -44,7 +44,6 @@ MOT_HOVER_LEARN 2
 # VISION NAVIGATION / EKF3 OVERRIDES
 # -------------------------------------------------------------
 AHRS_EKF_TYPE 3        # Force EKF3 to be the primary estimator
-EK3_SRC1_VELZ 3        # MILESTONE B ONLY - GPS. Revert to 1 (optical flow) after hover test. NOTE: 1 = OpticalFlow, not baro.
 
 LOG_BACKEND_TYPE 0
 
@@ -61,12 +60,12 @@ SR0_EXTRA3     2
 # SITL Rangefinder 1 Configuration
 RNGFND1_TYPE     100
 RNGFND1_MIN_CM   10
-RNGFND1_MAX_CM   4000
+RNGFND1_MAX_CM   400
 RNGFND1_ORIENT   25
 RNGFND1_GNDCLEAR 10
 
 # Optical Flow / Vision Speed Estimate EKF3 Fusion
-EK3_SRC1_POSZ 6
+EK3_SRC1_POSZ    2
 EK3_SRC1_VELZ    0
 GPS_TYPE         0
 
@@ -75,14 +74,15 @@ INS_USE2         0
 INS_USE3         0
 INS_ENABLE_MASK  1
 
-# Disable simulation pre-arm calibration checks
 ARMING_CHECK 1
 
 # === Locked Pure VIO Architecture ===
 VISO_TYPE        1
+VISO_DELAY_MS    0
 EK3_SRC1_POSXY   6
 EK3_SRC1_VELXY   6
 EK3_SRC1_YAW     6
+EK3_CHECK_SCALE  200
 COMPASS_USE      0
 INS_ACC2OFFS_X 0.0
 INS_ACC2OFFS_Y 0.0
@@ -93,4 +93,4 @@ INS_ACC2SCAL_Z 1.0
 
 # --- EKF Failsafe Configuration (Gate 1.1 Hardening) ---
 FS_EKF_ACTION 1
-FS_EKF_THRESH 0.8
+FS_EKF_THRESH    1.0
