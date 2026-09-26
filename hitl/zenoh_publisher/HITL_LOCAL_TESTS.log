@@ -1,0 +1,108 @@
+Branch: hitl/jetson-rig
+Host: Windows
+The integration script uses fake ROS callbacks and real Rust Zenoh peers on loopback.
+An unrelated local peer 3 was already active and appears in the output.
+
+$ cargo test --locked --manifest-path hitl/zenoh_publisher/Cargo.toml
+   Compiling pushpak_hitl_zenoh_publisher v0.1.0 (C:\Users\HP\OneDrive\Desktop\codex\pushpak\Pushpak\hitl\zenoh_publisher)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.89s
+     Running unittests src\main.rs (hitl\zenoh_publisher\target\debug\deps\pushpak_hitl_zenoh_publisher-7c54affb4f250ac2.exe)
+
+running 3 tests
+test tests::parses_each_ros_adapter_message ... ok
+test tests::publishes_adapter_input_to_a_direct_peer ... ok
+test tests::remaining_peers_keep_exchanging_after_ground_station_stops ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.82s
+
+$ python -m unittest discover -s hitl/zenoh_publisher -p 'test_conversion.py' -v
+test_invalid_values (test_conversion.ConversionTest.test_invalid_values) ... ok
+test_ros_header_stamp_milliseconds (test_conversion.ConversionTest.test_ros_header_stamp_milliseconds) ... ok
+test_stable_survivor_ids (test_conversion.ConversionTest.test_stable_survivor_ids) ... ok
+test_units_and_orientation (test_conversion.ConversionTest.test_units_and_orientation) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.001s
+
+OK
+
+$ python hitl/zenoh_publisher/simulate_integration.py
+HITL Zenoh peer 2 ready (no zenohd)
+KEYFRAME peer=1
+HEARTBEAT peer=1
+KEYFRAME peer=1
+PEER ALIVE 1
+KEYFRAME peer=1
+KEYFRAME peer=1
+HEARTBEAT peer=1
+KEYFRAME peer=1
+KEYFRAME peer=1
+HEARTBEAT peer=1
+KEYFRAME peer=1
+KEYFRAME peer=1
+KEYFRAME peer=3
+HEARTBEAT peer=3
+PEER ALIVE 3
+KEYFRAME peer=1
+KEYFRAME peer=3
+HEARTBEAT peer=1
+KEYFRAME peer=1
+KEYFRAME peer=3
+HEARTBEAT peer=3
+KEYFRAME peer=1
+KEYFRAME peer=3
+HEARTBEAT peer=1
+KEYFRAME peer=1
+KEYFRAME peer=3
+KEYFRAME peer=1
+KEYFRAME peer=3
+HEARTBEAT peer=3
+pushpak_peer 1 ready (Zenoh peer mode; no zenohd)
+KEYFRAME peer=2 t_ms=3731601782 pos=(0,0,1000)
+HEARTBEAT peer=2 t_ms=3731601782 flags=0
+KEYFRAME peer=2 t_ms=3731601984 pos=(0,0,1000)
+SURVIVOR peer=2 id=1 confidence=87pct
+PASS: fake ROS detection -> adapter -> Rust protobuf -> Zenoh -> peer
+PEER ALIVE 2
+KEYFRAME peer=2 t_ms=12345 pos=(2000,-500,1500)
+KEYFRAME peer=2 t_ms=12345 pos=(2000,-500,1500)
+PASS: odometry keyframe uses the filtered pose and header stamp
+HEARTBEAT peer=2 t_ms=3731602394 flags=4
+KEYFRAME peer=2 t_ms=3731602597 pos=(0,0,1000)
+HEARTBEAT peer=3 t_ms=6510016 flags=0
+KEYFRAME peer=3 t_ms=6510016 pos=(0,0,1000)
+KEYFRAME peer=2 t_ms=3731602798 pos=(0,0,1000)
+PEER ALIVE 3
+KEYFRAME peer=3 t_ms=6510203 pos=(100,0,1000)
+KEYFRAME peer=2 t_ms=3731603001 pos=(0,0,1000)
+HEARTBEAT peer=2 t_ms=3731603001 flags=4
+HEARTBEAT peer=0 t_ms=4 flags=0
+KEYFRAME peer=0 t_ms=4 pos=(0,0,1000)
+PEER ALIVE 0
+KEYFRAME peer=3 t_ms=6510406 pos=(200,50,1000)
+KEYFRAME peer=2 t_ms=3731603203 pos=(0,0,1000)
+HEARTBEAT peer=3 t_ms=6510500 flags=0
+KEYFRAME peer=3 t_ms=6510611 pos=(300,100,1000)
+KEYFRAME peer=2 t_ms=3731603408 pos=(0,0,1000)
+KEYFRAME peer=3 t_ms=6510812 pos=(400,150,1000)
+KEYFRAME peer=2 t_ms=3731603609 pos=(0,0,1000)
+HEARTBEAT peer=2 t_ms=3731603609 flags=4
+KEYFRAME peer=3 t_ms=6511014 pos=(0,0,1000)
+HEARTBEAT peer=3 t_ms=6511014 flags=0
+KEYFRAME peer=2 t_ms=3731603811 pos=(0,0,1000)
+KEYFRAME peer=3 t_ms=6511202 pos=(100,0,1000)
+KEYFRAME peer=2 t_ms=3731604015 pos=(0,0,1000)
+KEYFRAME peer=3 t_ms=6511405 pos=(200,50,1000)
+KEYFRAME peer=2 t_ms=3731604217 pos=(0,0,1000)
+HEARTBEAT peer=2 t_ms=3731604217 flags=4
+HEARTBEAT peer=3 t_ms=6511513 flags=0
+KEYFRAME peer=3 t_ms=6511607 pos=(300,100,1000)
+KEYFRAME peer=2 t_ms=3731604419 pos=(0,0,1000)
+KEYFRAME peer=3 t_ms=6511809 pos=(400,150,1000)
+KEYFRAME peer=2 t_ms=3731604623 pos=(0,0,1000)
+PEER LOST 0
+KEYFRAME peer=3 t_ms=6512012 pos=(0,0,1000)
+HEARTBEAT peer=3 t_ms=6512012 flags=0
+KEYFRAME peer=2 t_ms=3731604825 pos=(0,0,1000)
+HEARTBEAT peer=2 t_ms=3731604825 flags=4
+PASS: rig and SITL traffic continues after ground peer 0 stops

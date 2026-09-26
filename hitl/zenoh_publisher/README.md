@@ -40,6 +40,7 @@ The script checks Heartbeat, Keyframe, and SurvivorEvent delivery, switches from
 mock to odometry pose, stops peer `0`, and checks that peers `1` and `2` keep
 communicating while `0` is reported lost within two seconds. It requires no ROS
 installation or Jetson and does not replace the physical three-machine test.
+The complete raw output from a local run is in [HITL_LOCAL_TESTS.log](HITL_LOCAL_TESTS.log).
 
 ## Tier 1: fixed mock pose
 
