@@ -292,8 +292,9 @@ message Heartbeat {
 }
 ```
 
-Measured serialized sizes (round-trip verified): `SubMapKeyframe` 29 B typical,
-35 B worst case · `SurvivorEvent` ≤ 29 B · `Heartbeat` ≤ 11 B. All under 50 B.
+Measured serialized sizes (round-trip verified): `SubMapKeyframe` 29 B in a
+typical sample, but 54 B at unrestricted 32-bit extremes; the publisher rejects
+payloads over 50 B. Operational-angle boundary values fit within 50 B.
 Proto3 has no 16-bit integer type; `sint32` with zigzag encoding costs the same bytes
 for centidegree values.
 

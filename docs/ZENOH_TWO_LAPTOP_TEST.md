@@ -223,7 +223,6 @@ Stop peer 0, representing the ground station, and confirm that 3 and 4 continue
 receiving each other's heartbeats and keyframes. This is the ground-station-loss
 demo; a two-peer test alone does not establish it.
 
-Send the screenshots/logs and recorded commit to the team. The next coding task
-is the HITL Zenoh publisher (`drone_id = 2`) that converts
-`/detections/survivor` into `SurvivorEvent` and switches the keyframe pose source
-between a fixed Tier-1 mock pose and `/odometry/filtered` through configuration.
+Send the screenshots/logs and recorded commit to the team. The HITL Zenoh
+publisher is on `hitl/jetson-rig`; its local integration rehearsal and Jetson
+instructions are in [the HITL README](../hitl/zenoh_publisher/README.md).

@@ -26,6 +26,21 @@ Build natively on the Jetson. Python needs `rclpy`, `nav_msgs`, and the built
 `hitl/zenoh_publisher/target/release/` by default; `rust_binary` can override
 the path.
 
+Before using hardware, run the local integration rehearsal. It replaces ROS
+callbacks with test messages but runs the actual Python adapter, Rust publisher,
+Protobuf encoder, and three Zenoh peer processes over loopback TCP:
+
+```bash
+cargo build --locked --manifest-path src/pushpak_peer/Cargo.toml
+cargo build --locked --manifest-path hitl/zenoh_publisher/Cargo.toml
+python3 hitl/zenoh_publisher/simulate_integration.py
+```
+
+The script checks Heartbeat, Keyframe, and SurvivorEvent delivery, switches from
+mock to odometry pose, stops peer `0`, and checks that peers `1` and `2` keep
+communicating while `0` is reported lost within two seconds. It requires no ROS
+installation or Jetson and does not replace the physical three-machine test.
+
 ## Tier 1: fixed mock pose
 
 The launch file exposes `pose_source` as a launch argument. From the repo
