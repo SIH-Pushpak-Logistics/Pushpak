@@ -26,6 +26,7 @@ KEYFRAMES = ROOT / 'src/pushpak_peer/testdata/keyframes.csv'
 
 class FakeNode:
     overrides = {}
+    clock_ns = None
 
     def __init__(self, name):
         self.parameters = {}
@@ -43,7 +44,8 @@ class FakeNode:
         return callback
 
     def get_clock(self):
-        return SimpleNamespace(now=lambda: SimpleNamespace(nanoseconds=time.time_ns()))
+        now_ns = self.clock_ns if self.clock_ns is not None else time.time_ns()
+        return SimpleNamespace(now=lambda: SimpleNamespace(nanoseconds=now_ns))
 
     def get_logger(self):
         return SimpleNamespace(info=lambda message: None, warning=lambda message: print(message))
@@ -134,7 +136,18 @@ def main():
             'rust_binary': str(RIG_BINARY),
             'connect_endpoints': [endpoint],
         }
+        FakeNode.clock_ns = 5_555_000_000  # Simulated ROS /clock, not process uptime.
         adapter = RosZenohAdapter()
+        original_send = adapter.send
+        survivor_timestamps = []
+
+        def check_survivor_stamp(message):
+            if message['kind'] == 'survivor':
+                survivor_timestamps.append(message['timestamp_ms'])
+                print(f"ADAPTER SURVIVOR t_ms={message['timestamp_ms']}", flush=True)
+            original_send(message)
+
+        adapter.send = check_survivor_stamp
 
         def run_fake_timers():
             next_heartbeat = time.monotonic()
@@ -150,14 +163,14 @@ def main():
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             try:
-                wait_for(output, 'HEARTBEAT peer=2', timeout=0.5)
+                wait_for(output, 'HEARTBEAT peer=2 t_ms=5555', timeout=0.5)
                 break
             except TimeoutError:
                 continue
         else:
             raise TimeoutError('the peer did not receive the adapter heartbeat')
 
-        wait_for(output, 'KEYFRAME peer=2')
+        wait_for(output, 'KEYFRAME peer=2 t_ms=5555')
         detection = SimpleNamespace(
             world_position=SimpleNamespace(x=1.2, y=-0.3, z=1.1),
             confidence=0.87,
@@ -165,6 +178,8 @@ def main():
         )
         with send_lock:
             adapter.on_detection(detection)
+        if survivor_timestamps != [1000]:
+            raise AssertionError(f'detection header stamp was lost: {survivor_timestamps}')
         wait_for(output, 'SURVIVOR peer=2 id=1 confidence=87pct')
         print('PASS: fake ROS detection -> adapter -> Rust protobuf -> Zenoh -> peer')
 

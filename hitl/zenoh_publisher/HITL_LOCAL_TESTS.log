@@ -106,3 +106,84 @@ HEARTBEAT peer=3 t_ms=6512012 flags=0
 KEYFRAME peer=2 t_ms=3731604825 pos=(0,0,1000)
 HEARTBEAT peer=2 t_ms=3731604825 flags=4
 PASS: rig and SITL traffic continues after ground peer 0 stops
+
+Retest with explicit ROS clock and source-header assertions:
+$ python hitl/zenoh_publisher/simulate_integration.py
+HITL Zenoh peer 2 ready (no zenohd)
+pushpak_peer 1 ready (Zenoh peer mode; no zenohd)
+KEYFRAME peer=2 t_ms=5555 pos=(0,0,1000)
+HEARTBEAT peer=2 t_ms=5555 flags=0
+KEYFRAME peer=2 t_ms=5555 pos=(0,0,1000)
+ADAPTER SURVIVOR t_ms=1000
+KEYFRAME peer=1
+KEYFRAME peer=1
+HEARTBEAT peer=1
+KEYFRAME peer=1
+PEER ALIVE 1
+KEYFRAME peer=1
+KEYFRAME peer=1
+HEARTBEAT peer=1
+KEYFRAME peer=1
+KEYFRAME peer=1
+KEYFRAME peer=1
+HEARTBEAT peer=1
+KEYFRAME peer=3
+KEYFRAME peer=1
+KEYFRAME peer=3
+KEYFRAME peer=1
+HEARTBEAT peer=3
+PEER ALIVE 3
+HEARTBEAT peer=1
+KEYFRAME peer=3
+KEYFRAME peer=1
+KEYFRAME peer=3
+KEYFRAME peer=1
+KEYFRAME peer=3
+HEARTBEAT peer=3
+KEYFRAME peer=1
+HEARTBEAT peer=1
+KEYFRAME peer=3
+KEYFRAME peer=1
+KEYFRAME peer=3
+SURVIVOR peer=2 id=1 confidence=87pct
+PASS: fake ROS detection -> adapter -> Rust protobuf -> Zenoh -> peer
+PEER ALIVE 2
+KEYFRAME peer=2 t_ms=12345 pos=(2000,-500,1500)
+KEYFRAME peer=2 t_ms=12345 pos=(2000,-500,1500)
+PASS: odometry keyframe uses the filtered pose and header stamp
+HEARTBEAT peer=2 t_ms=5555 flags=4
+KEYFRAME peer=2 t_ms=5555 pos=(0,0,1000)
+KEYFRAME peer=2 t_ms=5555 pos=(0,0,1000)
+KEYFRAME peer=0 t_ms=0 pos=(0,0,1000)
+HEARTBEAT peer=0 t_ms=0 flags=0
+KEYFRAME peer=2 t_ms=5555 pos=(0,0,1000)
+HEARTBEAT peer=2 t_ms=5555 flags=4
+PEER ALIVE 0
+KEYFRAME peer=3 t_ms=6637612 pos=(300,100,1000)
+KEYFRAME peer=2 t_ms=5555 pos=(0,0,1000)
+KEYFRAME peer=3 t_ms=6637813 pos=(400,150,1000)
+KEYFRAME peer=2 t_ms=5555 pos=(0,0,1000)
+KEYFRAME peer=3 t_ms=6638013 pos=(0,0,1000)
+HEARTBEAT peer=3 t_ms=6638013 flags=0
+PEER ALIVE 3
+KEYFRAME peer=2 t_ms=5555 pos=(0,0,1000)
+HEARTBEAT peer=2 t_ms=5555 flags=4
+KEYFRAME peer=3 t_ms=6638215 pos=(100,0,1000)
+KEYFRAME peer=2 t_ms=5555 pos=(0,0,1000)
+KEYFRAME peer=3 t_ms=6638414 pos=(200,50,1000)
+HEARTBEAT peer=3 t_ms=6638507 flags=0
+KEYFRAME peer=2 t_ms=5555 pos=(0,0,1000)
+KEYFRAME peer=3 t_ms=6638613 pos=(300,100,1000)
+KEYFRAME peer=2 t_ms=5555 pos=(0,0,1000)
+HEARTBEAT peer=2 t_ms=5555 flags=4
+KEYFRAME peer=3 t_ms=6638801 pos=(400,150,1000)
+KEYFRAME peer=2 t_ms=5555 pos=(0,0,1000)
+KEYFRAME peer=3 t_ms=6639001 pos=(0,0,1000)
+HEARTBEAT peer=3 t_ms=6639001 flags=0
+KEYFRAME peer=3 t_ms=6639200 pos=(100,0,1000)
+KEYFRAME peer=2 t_ms=5555 pos=(0,0,1000)
+PEER LOST 0
+KEYFRAME peer=3 t_ms=6639402 pos=(200,50,1000)
+KEYFRAME peer=2 t_ms=5555 pos=(0,0,1000)
+HEARTBEAT peer=2 t_ms=5555 flags=4
+PASS: rig and SITL traffic continues after ground peer 0 stops
