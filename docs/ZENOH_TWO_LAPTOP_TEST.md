@@ -16,14 +16,31 @@ machines; operating-system scheduling is not a real-time guarantee.
 
 ## Required setup
 
-- Two laptops connected to the same phone hotspot or travel router.
+- Two laptops connected to the same access point with device-to-device traffic enabled.
 - Rust installed on both laptops (`rustc --version` and `cargo --version`).
 - TCP port `7447` allowed through the host firewall.
 - Repository branch `feat/zenoh-telemetry` checked out on both laptops.
 - No `zenohd` process running on either laptop.
 
-Use the phone hotspot or travel router rather than campus Wi-Fi. Campus Wi-Fi
-may block peer discovery or communication between connected devices.
+On 26 Sep 2026, the Ubuntu/Mac test passed on a laptop-hosted access point.
+The Android hotspot and campus Wi-Fi used in that test blocked traffic between
+devices. Check the actual network before starting Zenoh.
+
+## 0. Check connectivity between the two laptops
+
+Find each laptop's IP address on the shared access point. On Ubuntu, run
+`hostname -I`; on macOS, inspect `ifconfig` for the connected interface. Do
+not use `127.0.0.1`, a Docker address, or a VPN address. From **each** laptop,
+ping the other laptop's access-point IP:
+
+```bash
+ping -c 3 <OTHER_LAPTOP_IP>
+```
+
+Both directions must receive replies before the Zenoh test. If either ping
+fails, use a network that allows client-to-client traffic. Save the raw ping
+output with the other acceptance logs. In the commands below,
+`192.168.1.20` is Laptop A's example IP; replace it with the real address.
 
 ## 1. Prepare both laptops
 
@@ -49,6 +66,8 @@ test result: ok
 ```
 
 The first Zenoh build can take 10–15 minutes.
+`build.rs` supplies a vendored `protoc`, so no system `protoc` installation is
+required.
 
 ## 2. Confirm that no Zenoh router is running
 
@@ -69,27 +88,7 @@ Get-Process zenohd -ErrorAction SilentlyContinue
 
 This must also print nothing.
 
-## 3. Find Laptop A's hotspot IP address
-
-On Laptop A:
-
-```bash
-hostname -I
-```
-
-Choose the address belonging to the phone hotspot or travel-router interface.
-Do not use `127.0.0.1`, a Docker address, or a VPN address. In the examples
-below, Laptop A's address is shown as `192.168.1.20`; replace it with the real
-address.
-
-Windows PowerShell alternative:
-
-```powershell
-Get-NetIPAddress -AddressFamily IPv4 |
-  Where-Object IPAddress -NotLike '127.*'
-```
-
-## 4. Start Laptop A as a listening peer
+## 3. Start Laptop A as a listening peer
 
 From the repository root on Laptop A:
 
@@ -108,7 +107,7 @@ pushpak_peer 3 ready (Zenoh peer mode; no zenohd)
 
 Leave this terminal running.
 
-## 5. Connect Laptop B directly to Laptop A
+## 4. Connect Laptop B directly to Laptop A
 
 From the repository root on Laptop B, replacing `192.168.1.20` with Laptop A's
 real hotspot IP:
@@ -139,9 +138,9 @@ KEYFRAME peer=3 t_ms=... pos=(...,...,...)
 This is bidirectional communication. Laptop A is a Zenoh **peer**, not a
 central router; there is still no `zenohd` process.
 
-## 6. Test peer-loss detection
+## 5. Test peer-loss detection
 
-Stop Laptop B's peer with `Ctrl+C`, or disconnect Laptop B from the hotspot.
+Stop Laptop B's peer with `Ctrl+C`, or disconnect Laptop B from the access point.
 Keep Laptop A running.
 
 Laptop A must print the following within two seconds of the last heartbeat:
@@ -153,10 +152,11 @@ PEER LOST 4
 Laptop A must continue running and publishing its own telemetry. The loss of
 Laptop B must not stop or crash Laptop A.
 
-## 7. Evidence to save
+## 6. Evidence to save
 
-Save screenshots or terminal logs showing all of the following:
+Save raw terminal logs showing all of the following:
 
+- Ping replies in both directions before starting Zenoh.
 - `pgrep -a zenohd` produced no output on both laptops.
 - Laptop A received `HEARTBEAT peer=4` and printed `PEER ALIVE 4`.
 - Laptop B received `HEARTBEAT peer=3` and printed `PEER ALIVE 3`.
@@ -164,8 +164,8 @@ Save screenshots or terminal logs showing all of the following:
 - Laptop A printed `PEER LOST 4` within two seconds after Laptop B stopped.
 - Laptop A remained operational after Laptop B stopped.
 
-Record the two laptop IP addresses, operating systems, test date, and the Git
-commit printed by:
+Record the two laptop IP addresses, operating systems, test date, measured peer
+loss duration, and the Git commit printed by:
 
 ```bash
 git rev-parse HEAD
@@ -175,16 +175,17 @@ git rev-parse HEAD
 
 The test passes only when:
 
-1. Both peers exchange heartbeats and keyframes in both directions.
-2. No `zenohd` process runs on either laptop.
-3. Killing or disconnecting one peer does not stop the other peer.
-4. The surviving peer reports peer loss within two seconds.
+1. Both laptops can ping each other.
+2. Both peers exchange heartbeats and keyframes in both directions.
+3. No `zenohd` process runs on either laptop.
+4. Killing or disconnecting one peer does not stop the other peer.
+5. The surviving peer reports peer loss within two seconds.
 
 ## Troubleshooting
 
 ### No messages appear on either laptop
 
-1. Confirm both laptops are on the same hotspot/router subnet.
+1. Repeat the step 0 ping check on the connected access-point subnet.
 2. Recheck Laptop A's IP address.
 3. Confirm Laptop A is still running with `--listen tcp/0.0.0.0:7447`.
 4. Check that port `7447` is listening on Laptop A:
@@ -223,6 +224,6 @@ Stop peer 0, representing the ground station, and confirm that 3 and 4 continue
 receiving each other's heartbeats and keyframes. This is the ground-station-loss
 demo; a two-peer test alone does not establish it.
 
-Send the screenshots/logs and recorded commit to the team. The HITL Zenoh
-publisher is on `hitl/jetson-rig`; its local integration rehearsal and Jetson
-instructions are in [the HITL README](../hitl/zenoh_publisher/README.md).
+Send the raw logs and recorded commit to the team. The HITL Zenoh publisher is
+on `hitl/jetson-rig`; its local integration rehearsal and Jetson instructions
+are in [the HITL README](../hitl/zenoh_publisher/README.md).
