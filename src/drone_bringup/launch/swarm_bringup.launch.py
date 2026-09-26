@@ -1,32 +1,23 @@
-import os
-from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
+
 
 def generate_launch_description():
-    # 1. Resolve Package Paths
-    drone_bringup_dir = get_package_share_directory('drone_bringup')
-    bridge_config_path = os.path.join(drone_bringup_dir, 'config', 'bridge.yaml')
+    common = {
+        'use_sim_time': ParameterValue(LaunchConfiguration('use_sim_time'), value_type=bool),
+        'drone_id': ParameterValue(LaunchConfiguration('drone_id'), value_type=int),
+    }
 
-    # 2. The ROS-GZ Bridge Node
-    # This node consumes the bridge.yaml file and translates gz.msgs to sensor_msgs
-    bridge_node = Node(
-        package='ros_gz_bridge',
-        executable='parameter_bridge',
-        parameters=[{
-            'config_file': bridge_config_path,
-            'expand_gz_topic_names': True
-        }],
-        output='screen'
-    )
-
-    # 3. Build and Return the Execution Graph
-    common = {'use_sim_time': True, 'drone_id': 'drone_00'}
-
-    brain_nodes = [
+    onboard_nodes = [
         Node(package='navigation_brain', executable=exe, name=exe,
              output='screen', parameters=[common])
         for exe in ['altimeter_node']
     ]
 
-    return LaunchDescription([bridge_node] + brain_nodes)
+    return LaunchDescription([
+        DeclareLaunchArgument('use_sim_time', default_value='false'),
+        DeclareLaunchArgument('drone_id'),
+    ] + onboard_nodes)

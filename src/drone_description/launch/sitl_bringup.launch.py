@@ -85,17 +85,28 @@ def generate_launch_description():
     )
 
 
+    bridge_node = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        parameters=[{
+            'config_file': os.path.join(drone_bringup_dir, 'config', 'bridge.yaml'),
+            'expand_gz_topic_names': True
+        }],
+        output='screen'
+    )
+
     # 7. Boot the Logic Brains
     swarm_bringup = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([os.path.join(drone_bringup_dir, 'launch', 'swarm_bringup.launch.py')]),
-        launch_arguments={'use_sim_time': use_sim_time}.items()
+        launch_arguments={'use_sim_time': use_sim_time,
+                          'drone_id': LaunchConfiguration('drone_id')}.items()
     )
 
     # 8. Strict Deterministic Execution Handoff
     spawn_exit_event = RegisterEventHandler(
         event_handler=OnProcessExit(
             target_action=spawn_entity_harmonic,
-            on_exit=[ardupilot_sitl, swarm_bringup] 
+            on_exit=[ardupilot_sitl, bridge_node, swarm_bringup] 
         )
     )
 
@@ -114,6 +125,8 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='true'),
+        DeclareLaunchArgument('drone_id', default_value='1',
+                              description='Zenoh drone_id of this vehicle'),
         DeclareLaunchArgument(
             'camera_rate', default_value='15',
             description='Camera update rate in Hz. 15 suits software-rendered hosts; pass 30 on GPU hosts.'),
