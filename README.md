@@ -60,6 +60,7 @@ A PR that breaks one is rejected without review.
 | **I-8** | Simulation code is quarantined. Sim-only nodes carry the `sim_` prefix and are absent from any hardware launch file. `/sim/*` topics are consumed only by `sim_` nodes and offline evaluation. No sim frame convention or magic constant appears in a non-`sim_` node. |
 | **I-9** | No dead streams. A topic, stream, message or file with no consumer is deleted. |
 | **I-10** | Every injected error parameter (noise σ, bias, bias random-walk) cites an external source in the code's PR description. Drift is reported as a sweep over bias values, never a single hand-picked figure. |
+| **I-11** | Every tunable number in a ROS node (rates, gains, thresholds, noise, covariances) is a declared parameter loaded from `src/drone_bringup/config/pushpak_params.yaml`. Platform differences are overlay files, never forked code. Topic names stay fixed in code; remapping is how platforms rewire. |
 
 ---
 
@@ -209,7 +210,7 @@ It does not hold position. FS-4 covers this.
 
 | Input | x y z | roll pitch yaw | vx vy vz | vroll vpitch vyaw | ax ay az |
 |---|---|---|---|---|---|
-| `imu0` `/imu/raw` | – – – | ✓ ✓ **✗** | – – – | ✓ ✓ ✓ | tunable |
+| `imu0` `/imu/raw` | – – – | ✓ ✓ **✗** | – – – | ✓ ✓ ✓ | ✗ ✗ ✗ |
 | `twist0` `/radar/ego_velocity` | – – – | – – – | ✓ ✓ ✓ | – – – | – – – |
 | `twist1` `/visual/velocity` | – – – | – – – | ✓ ✓ – | – – – | – – – |
 | `pose0` `/ekf/altitude_pose` | – – ✓ | – – – | – – – | – – – | – – – |
@@ -217,7 +218,7 @@ It does not hold position. FS-4 covers this.
 **Absolute yaw from the IMU is never fused.** Heading is integrated from `vyaw` and
 drifts. That is the honest GPS-denied behaviour, and it breaks the ExtNav yaw loop.
 `frequency: 50`, `two_d_mode: false`, `world_frame: odom`, `publish_tf: false`.
-Roll/pitch from the sim IMU is noise-free; see scaffold S-6.
+Roll/pitch from the sim IMU is noise-free; see scaffold S-6. Accelerations are not fused: the filter has no accelerometer-bias state, and S-6 makes gravity removal unrealistically exact in simulation.
 
 ---
 
@@ -252,6 +253,7 @@ Containers use `network_mode: host` — multicast discovery does not cross Docke
 
 `drone_id`: `0` ground station gateway, `1` SITL scout, `2` HITL rig, `3+` `pushpak_peer`.
 The gateway publishes heartbeats because it is a peer.
+The ROS parameter `drone_id` is this same integer on every node and a required launch argument; the `drone_%02d` string exists only in the gateway (§9).
 
 `status_flags` bits: `0` VIO_Active · `1` Radar_Active · `2` Survivor_Found ·
 `3` Backtracking · `4` Isolated (FS-2 active).
@@ -295,8 +297,7 @@ Measured serialized sizes (round-trip verified): `SubMapKeyframe` 29 B typical,
 Proto3 has no 16-bit integer type; `sint32` with zigzag encoding costs the same bytes
 for centidegree values.
 
-**Version pin: OPEN — owner Kanishk, `feat/zenoh-telemetry`.** One exact 1.x version,
-shared by the Rust crate, the Python `eclipse-zenoh` package and the Dockerfile.
+**Version pin: 1.0.0**, identical in the Dockerfile (`ZENOH_VERSION`), the Python `eclipse-zenoh==1.0.0` package and the Rust crate (`zenoh = "=1.0.0"`).
 
 ---
 
@@ -398,6 +399,7 @@ Each entry is a known compromise with a removal gate.
 | S-4 | `set_gp_origin` / `CommandHome` with a fixed lat/lon | EKF3 needs an arbitrary origin to run a local frame; no GPS is used | None needed on hardware — any arbitrary origin; documented, not removed |
 | S-5 | `swarm.sdf` | Only world until `collapse.sdf` merges | `collapse.sdf` merged |
 | S-6 | Noise-free roll/pitch from sim IMU | Gazebo IMU orientation is exact | Hardware IMU with onboard AHRS |
+| S-7 | Zero bias on `ros_imu` gyro and accelerometer | The ICM-42688-P datasheet (DS-000347 r1.6) publishes white-noise density only, no bias-instability figure | A cited bias-instability value for the rig IMU, or an Allan-variance log from the rig itself |
 
 ---
 
@@ -431,14 +433,19 @@ EOF
 
 State these before judges find them.
 
-1. **Horizontal position drift is unbounded, and in simulation its magnitude is set by
-   the injected radar bias.** White noise at σ = 0.15 m/s integrates to only ~0.2–0.3 m
-   over 90 s. Drift of metres comes from bias: 0.05 m/s → 4.5 m, 0.15 m/s → 13.5 m over
-   90 s. We therefore report drift as a sweep across cited bias values (I-10), and demo
-   runs are bounded to 90 s.
+1. **Horizontal position drift is unbounded, and in simulation its size is set by the
+   injected radar bias.** Radar noise σ = 0.15 m/s sits inside the 0.10–0.28 m/s
+   ego-velocity RMSE of fused radar-inertial output reported by Kramer et al. (ICRA 2020,
+   Table II: TI AWR1843 on a quadrotor, Vicon truth). That paper treats radar velocity as
+   bias-free, so the cited nominal bias is 0. Since RMSE² = bias² + σ², a constant bias
+   cannot exceed the RMSE of a system that achieves it; the sweep's top value, 0.10 m/s,
+   is the paper's best-case RMSE. The bias sweep is a bounded stress test, not a measured
+   radar property. Under zero-velocity hover the predicted drift is b·t: 3 m at 60 s for
+   0.05 m/s, 6 m for 0.10 m/s. Mounting-angle and scale-factor errors scale with speed and
+   vanish in hover, so the hover gate does not test them. Demo runs are bounded to 90 s.
 2. **Radar is emulated** from simulator body velocity plus noise and bias. We test filter
    behaviour under noise, not radar physics.
-3. **Heading drifts.** Absolute yaw is never fused (§6).
+3. **Heading drifts, but barely in simulation.** Absolute yaw is never fused (§6). With datasheet white noise and no injected gyro bias (S-7), simulated heading drifts about 0.02° per minute; on hardware, gyro bias dominates.
 4. **Backtracking follows the estimate, not the truth.** The vehicle returns to where the
    filter believes it has been.
 5. **No aerodynamic environment.** Wind, downwash, ground effect, wall suction: out of
@@ -457,11 +464,63 @@ State these before judges find them.
 
 | Item | Owner | Due |
 |---|---|---|
-| Zenoh exact version pin | Kanishk | Day 2 |
-| Radar noise, bias and bias random-walk values with citations | Ashutosh | Day 2 |
 | Laplacian-variance dust threshold | Raunak | Day 3 |
-| `backtrack_cov_threshold` | Ashutosh | Day 4 (hover gate) |
-| Hardware inventory and rig tier (1/2/3) | Kanishk | Day 1 |
+| `backtrack_cov_threshold`, recorded with the `process_noise_covariance` it was derived from (§17) | Ashutosh | Day 4 (hover gate) |
+| Hardware inventory and rig tier (1/2/3) | Kanishk | Day 1, **overdue** |
 | HaLow channel-plan legality in India (design target) | Kanishk | before the deck freezes |
 | `pushpak_brain` Python skeleton: zero-velocity hold, full topic/param contract. Required by the Phase 3 hover gate: with no `cmd_vel` writer, FS-4 lands the vehicle 1 s after airborne | Ashutosh | Day 3 |
 | Pin rustc 1.98.1 in `Dockerfile`; delete build dirs in the same layer to shrink the image | Ashutosh | next Dockerfile change |
+
+### Tripwires
+
+A tripwire is decided in advance and executed without debate when its deadline passes.
+
+| # | Tripwire | Deadline | Fallback |
+|---|---|---|---|
+| T-1 | Two laptops not exchanging `Heartbeat` on `pushpak/heartbeat/{drone_id}` (Zenoh 1.0.0, peer mode, no router) | end of Sun 27 Sep | Telemetry moves to Python `eclipse-zenoh` 1.0.0 with the same proto and keys. Rust crate work stops. |
+| T-2 | Jetson not physically present | end of Sun 27 Sep | HITL is out. `pushpak_peer` runs on T-1's second laptop, so the second peer is still a separate machine. |
+| T-3 | TI radar not streaming a point cloud on the Jetson | 24 h after the Jetson is first powered | Radar leaves the rig: camera + YOLO + Zenoh, FC as IMU. No hardware is ordered. |
+| T-4 | `rclrs` not building in the container | fired Day 2 (§1) | `pushpak_brain` is Python. |
+| T-5 | `collapse.sdf` not merged | Day 6 | Demo runs in `swarm.sdf`; S-5 stays, and the deck says so. |
+
+Only one `pushpak_brain` implementation is ever launched (I-3).
+
+---
+
+## 17. Hover Gate Protocol (Phase 3)
+
+The vehicle hovers on dead-reckoned `/odometry/filtered` with no ground truth in the flight
+path. Inputs are radar and IMU only; `/visual/velocity` does not exist yet, which is the
+harder case.
+
+**Arming order** (`arm_takeoff_handshake.py`): `robot_localization` publishing →
+`vio_bridge_node` streaming ExtNav → origin and home accepted → `/mavros/estimator_status`
+reports horizontal velocity and horizontal relative position OK → GUIDED → arm → takeoff
+1.5 m → `/pushpak/airborne` → FS-4 armed. Every `/mavros/statustext/recv` message during
+the handshake is logged. A pre-arm refusal is fixed at its cause; `ARMING_CHECK` stays 1.
+
+**Runs.** Three 60 s hovers on zero-velocity setpoints from `pushpak_brain`. The radar
+`seed` and `gz sim --seed` are fixed and identical across runs. `bias_initial` is applied
+on body x only, at 0, 0.05 and 0.10 m/s (§15). Nothing else changes between runs.
+Recorded: `/odometry/filtered`, `/sim/ground_truth/odom`, `/radar/ego_velocity`,
+`/mavros/local_position/pose`, `/mavros/state`, `/mavros/statustext/recv`.
+
+**Metric** (offline evaluation only, I-8). t₀ is `/pushpak/airborne`. Ground truth is
+interpolated to the estimate's sim-time stamps and its displacement is rotated by
+ψ_est(t₀) − ψ_gt(t₀) into `odom`. d(t) is the horizontal norm of estimated displacement
+minus rotated true displacement. Reported per run: d(60 s), the fitted slope in m/min, and
+the prediction b·t.
+
+**Pass.** MAVROS mode is GUIDED for all 60 s of every run, and |d(60 s) − b·60 s| ≤ 0.5 m
+in every run. 0.5 m is 2σ of radar white noise integrated over 60 s:
+0.15 m/s × √(0.05 s × 60 s) ≈ 0.26 m.
+
+**Evidence in the PR.** Mid-run `ros2 topic info -v` for `/sim/ground_truth/odom` (only
+`sim_radar_emulator_node` and the recorder subscribe) and for
+`/mavros/setpoint_velocity/cmd_vel` (only `pushpak_brain` publishes); the drift table; the
+IMU citation (S-7, ICM-42688-P DS-000347 r1.6) and the radar citation (§15).
+
+**`backtrack_cov_threshold`.** Tr(Σ_v) of `/odometry/filtered` with radar healthy and with
+`/sim/fault/radar` true, visual absent in both, which is the FS-3 condition. The threshold
+sits between the two and is recorded with the `process_noise_covariance` it came from.
+Changing Q invalidates it.
