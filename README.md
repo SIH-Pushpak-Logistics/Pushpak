@@ -299,6 +299,19 @@ for centidegree values.
 
 **Version pin: 1.0.0**, identical in the Dockerfile (`ZENOH_VERSION`), the Python `eclipse-zenoh==1.0.0` package and the Rust crate (`zenoh = "=1.0.0"`).
 
+Build and test the routerless Rust peer:
+
+```bash
+cargo test --manifest-path src/pushpak_telemetry/Cargo.toml
+cargo run --release --manifest-path src/pushpak_peer/Cargo.toml -- \
+  --drone-id 3 --keyframes path/to/keyframes.csv
+```
+
+Run another laptop with a different `--drone-id`. Multicast scouting is enabled by
+default; when a network blocks it, add one or more explicit peer endpoints such as
+`--listen tcp/0.0.0.0:7447` on one peer and `--connect tcp/192.168.1.20:7447`
+on the other. Neither command starts or requires `zenohd`.
+
 ---
 
 ## 9. Dashboard WebSocket Contract
