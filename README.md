@@ -312,6 +312,23 @@ default; when a network blocks it, add one or more explicit peer endpoints such 
 `--listen tcp/0.0.0.0:7447` on one peer and `--connect tcp/192.168.1.20:7447`
 on the other. Neither command starts or requires `zenohd`.
 
+Use `--locked` for reproducible builds and tests. The internal Zenoh crates are
+also pinned to 1.0.0 because that release's caret dependencies otherwise select
+incompatible later internals. See [two-machine acceptance](docs/ZENOH_TWO_LAPTOP_TEST.md).
+
+Telemetry rejects payloads larger than 50 bytes and IDs that disagree with the
+session or topic. The frozen proto permits a 54-byte keyframe at unrestricted
+32-bit extremes; therefore a universal <=50-byte schema guarantee is impossible.
+The operational-angle boundary test fits within 50 bytes, while a separate test
+records the 54-byte schema limit. This limit excludes Zenoh/TCP framing overhead.
+
+`peers_alive(timeout)` tracks valid heartbeats immediately after opening a peer,
+even without `subscribe_all`. Callbacks run on Zenoh threads and should return
+quickly. Replay uses CSV timestamps to select the most recent pose at 5 Hz,
+loops with a 200 ms final hold, and stamps both heartbeat and keyframe from the
+same elapsed replay clock (wrapping at uint32 milliseconds). Real ROS producers
+must supply their own simulation/ROS timestamps through the library API.
+
 ---
 
 ## 9. Dashboard WebSocket Contract

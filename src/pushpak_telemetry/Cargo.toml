@@ -41,3 +41,6 @@ zenoh-util = "=1.0.0"
 [build-dependencies]
 prost-build = "0.13"
 protoc-bin-vendored = "3"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }

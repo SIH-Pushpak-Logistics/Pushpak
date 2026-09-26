@@ -6,6 +6,14 @@ Prove that two Pushpak peers exchange telemetry directly over Zenoh without a
 central server. Passing this test proves the routerless communication path; it
 does not yet test the ROS survivor-detection integration.
 
+Zenoh still needs an IP network (Ethernet or Wi-Fi); it does not provide a radio
+link itself. The previously shared terminal-style image was a rendering of
+selected local test log lines, not a screenshot of a two-machine test.
+
+The peer expires heartbeats after 1.75 seconds and checks every 100 ms, leaving
+margin within the two-second target. Measure the actual delay on the test
+machines; operating-system scheduling is not a real-time guarantee.
+
 ## Required setup
 
 - Two laptops connected to the same phone hotspot or travel router.
@@ -209,6 +217,11 @@ Install Visual Studio Build Tools 2022 with the **Desktop development with C++**
 workload, restart the terminal, and run the Cargo command again.
 
 ## After this test passes
+
+Also run three peers (IDs 0, 3 and 4), with a direct connection between 3 and 4.
+Stop peer 0, representing the ground station, and confirm that 3 and 4 continue
+receiving each other's heartbeats and keyframes. This is the ground-station-loss
+demo; a two-peer test alone does not establish it.
 
 Send the screenshots/logs and recorded commit to the team. The next coding task
 is the HITL Zenoh publisher (`drone_id = 2`) that converts

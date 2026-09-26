@@ -29,7 +29,8 @@ fn parse_keyframes(input: &str) -> Result<Vec<CsvKeyframe>, String> {
     let mut keyframes = Vec::new();
     for (index, line) in input.lines().enumerate() {
         let line = line.trim();
-        if line.is_empty() || (index == 0 && line.starts_with("t_ms,")) {
+        let line = line.trim_start_matches('\u{feff}');
+        if line.is_empty() || (keyframes.is_empty() && line == "t_ms,x_mm,y_mm,z_mm,yaw_cdeg") {
             continue;
         }
         let values = line.split(',').map(str::trim).collect::<Vec<_>>();
@@ -57,6 +58,12 @@ fn parse_keyframes(input: &str) -> Result<Vec<CsvKeyframe>, String> {
     if keyframes.is_empty() {
         Err("keyframe log contains no rows".into())
     } else {
+        if keyframes
+            .windows(2)
+            .any(|rows| rows[1].timestamp_ms <= rows[0].timestamp_ms)
+        {
+            return Err("CSV timestamps must be strictly increasing".into());
+        }
         Ok(keyframes)
     }
 }
@@ -95,13 +102,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let heartbeat_peer = Arc::clone(&telemetry);
+    let started = time::Instant::now();
+    let epoch_ms = keyframes[0].timestamp_ms;
     let heartbeat_task = tokio::spawn(async move {
-        let started = time::Instant::now();
         let mut interval = time::interval(Duration::from_millis(500));
+        interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
         loop {
             interval.tick().await;
             let m = Heartbeat {
-                timestamp_ms: started.elapsed().as_millis() as u32,
+                timestamp_ms: epoch_ms.wrapping_add(started.elapsed().as_millis() as u32),
                 drone_id: heartbeat_peer.drone_id(),
                 status_flags: 0,
             };
@@ -112,13 +121,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let keyframe_peer = Arc::clone(&telemetry);
     let keyframe_task = tokio::spawn(async move {
-        let mut index = 0usize;
         let mut interval = time::interval(Duration::from_millis(200));
+        interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+        let cycle_ms = u64::from(keyframes.last().unwrap().timestamp_ms - epoch_ms) + 200;
         loop {
             interval.tick().await;
+            let elapsed_ms = started.elapsed().as_millis() as u64;
+            let replay_ms = elapsed_ms % cycle_ms;
+            let index = keyframes
+                .partition_point(|row| u64::from(row.timestamp_ms - epoch_ms) <= replay_ms)
+                .saturating_sub(1);
             let row = keyframes[index];
             let m = SubMapKeyframe {
-                timestamp_ms: row.timestamp_ms,
+                timestamp_ms: epoch_ms.wrapping_add(elapsed_ms as u32),
                 drone_id: keyframe_peer.drone_id(),
                 pos_x_mm: row.x_mm,
                 pos_y_mm: row.y_mm,
@@ -131,16 +146,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Err(e) = keyframe_peer.publish_keyframe(&m).await {
                 eprintln!("keyframe publish failed: {e}");
             }
-            index = (index + 1) % keyframes.len();
         }
     });
     let liveness_peer = Arc::clone(&telemetry);
     let liveness_task = tokio::spawn(async move {
         let mut previous = Vec::new();
-        let mut interval = time::interval(Duration::from_millis(250));
+        let mut interval = time::interval(Duration::from_millis(100));
+        interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
         loop {
             interval.tick().await;
-            let current = liveness_peer.peers_alive(Duration::from_secs(2));
+            // Leave polling/scheduling margin inside the two-second acceptance budget.
+            let current = liveness_peer.peers_alive(Duration::from_millis(1750));
             for id in previous.iter().filter(|id| !current.contains(id)) {
                 println!("PEER LOST {id}");
             }
@@ -154,12 +170,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     heartbeat_task.abort();
     keyframe_task.abort();
     liveness_task.abort();
+    let _ = tokio::join!(heartbeat_task, keyframe_task, liveness_task);
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rejects_bad_replay_logs() {
+        for csv in [
+            "",
+            "0,1,2",
+            "bad,1,2,3,4",
+            "200,1,2,3,4\n0,1,2,3,4",
+            "0,1,2,3,4\n0,1,2,3,4",
+        ] {
+            assert!(parse_keyframes(csv).is_err());
+        }
+        assert!(parse_keyframes("\u{feff}\n\nt_ms,x_mm,y_mm,z_mm,yaw_cdeg\n0,0,0,0,0").is_ok());
+    }
     #[test]
     fn parses_header_and_rows() {
         let rows = parse_keyframes("t_ms,x_mm,y_mm,z_mm,yaw_cdeg\n0,1,-2,3,900\n").unwrap();
