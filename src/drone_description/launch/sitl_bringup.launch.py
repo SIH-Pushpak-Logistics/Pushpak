@@ -111,7 +111,8 @@ def generate_launch_description():
     swarm_bringup = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([os.path.join(drone_bringup_dir, 'launch', 'swarm_bringup.launch.py')]),
         launch_arguments={'use_sim_time': use_sim_time,
-                          'drone_id': LaunchConfiguration('drone_id')}.items()
+                          'drone_id': LaunchConfiguration('drone_id'),
+                          'auto_takeoff': LaunchConfiguration('auto_takeoff')}.items()
     )
 
     # 8. Strict Deterministic Execution Handoff
@@ -137,6 +138,8 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='true'),
+        DeclareLaunchArgument('auto_takeoff', default_value='false',
+                              description='true runs the arm/takeoff handshake'),
         DeclareLaunchArgument('gz_seed', default_value='1', description='Gazebo random seed'),
         DeclareLaunchArgument('radar_seed', default_value='1', description='Radar emulator noise seed'),
         DeclareLaunchArgument('radar_bias_x', default_value='0.0',

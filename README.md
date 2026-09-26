@@ -510,9 +510,10 @@ interpolated to the estimate's sim-time stamps and its displacement is rotated b
 minus rotated true displacement. Reported per run: d(60 s), the fitted slope in m/min, and
 the prediction b·t.
 
-**Pass.** MAVROS mode is GUIDED for all 60 s of every run, and |d(60 s) − b·60 s| ≤ 0.5 m
-in every run. 0.5 m is 2σ of radar white noise integrated over 60 s:
-0.15 m/s × √(0.05 s × 60 s) ≈ 0.26 m.
+**Pass.** MAVROS mode is GUIDED for all 60 s of every run, and |d(60 s) − b·60 s| ≤ 0.8 m
+in every run. Radar white noise integrated over 60 s scatters each horizontal axis by
+0.15 m/s × √(0.05 s × 60 s) ≈ 0.26 m; d is a two-dimensional distance, so its 99% bound is
+0.26 m × √(−2 ln 0.01) ≈ 0.8 m.
 
 **Evidence in the PR.** Mid-run `ros2 topic info -v` for `/sim/ground_truth/odom` (only
 `sim_radar_emulator_node` and the recorder subscribe) and for
