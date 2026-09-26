@@ -1,93 +1,65 @@
 #!/usr/bin/env python3
 import math
+
 import rclpy
 from rclpy.node import Node
+from rclpy.time import Time
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseStamped, TwistWithCovarianceStamped
 
 
 class VioBridgeNode(Node):
-    """
-    PRODUCTION HARDWARE COMPONENT:
-    Assumes incoming /vio/odometry is in standard ROS ENU.
-    Performs zero simulation hacks. Runs byte-for-byte on Jetson Orin Nano.
-    """
     def __init__(self):
         super().__init__('vio_bridge_node')
+        rate_hz = self.declare_parameter('rate_hz', 30.0).value
+        self.max_age_s = self.declare_parameter('max_age_s', 0.1).value
+        self.latest = None
+        self.create_subscription(Odometry, '/odometry/filtered', self.odom_cb, 10)
+        self.pose_pub = self.create_publisher(PoseStamped, '/mavros/vision_pose/pose', 10)
+        self.twist_pub = self.create_publisher(
+            TwistWithCovarianceStamped, '/mavros/vision_speed/speed_twist_cov', 10)
+        self.create_timer(1.0 / rate_hz, self.tick)
+        self.get_logger().info(
+            f'vio_bridge: /odometry/filtered -> ExtNav at {rate_hz} Hz, max_age_s={self.max_age_s}')
 
-        self.odom_sub = self.create_subscription(
-            Odometry, '/vio/odometry', self.odom_cb, 10
-        )
+    def odom_cb(self, msg):
+        self.latest = msg
 
-        self.vision_pose_pub = self.create_publisher(
-            PoseStamped, '/mavros/vision_pose/pose', 10
-        )
-        self.vision_speed_pub = self.create_publisher(
-            TwistWithCovarianceStamped, '/mavros/vision_speed/speed_twist_cov', 10
-        )
-
-        self.latest_odom = None
-        # Strict 30 Hz timer matching OpenVINS output frequency
-        self.create_timer(0.0333, self.timer_cb)
-        self.get_logger().info('Production VIO Bridge (30 Hz) initialized.')
-
-    def odom_cb(self, msg: Odometry):
-        self.latest_odom = msg
-
-    def timer_cb(self):
-        if self.latest_odom is None:
+    def tick(self):
+        odom = self.latest
+        if odom is None:
+            return
+        age = (self.get_clock().now() - Time.from_msg(odom.header.stamp)).nanoseconds * 1e-9
+        if age < 0.0 or age > self.max_age_s:
             return
 
-        now_ns = self.get_clock().now().nanoseconds
-        odom_ns = (
-            self.latest_odom.header.stamp.sec * 1_000_000_000
-            + self.latest_odom.header.stamp.nanosec
-        )
-        age_sec = (now_ns - odom_ns) * 1e-9
-        if age_sec > 0.1 or age_sec < 0.0:
-            return
+        pose = PoseStamped()
+        pose.header.stamp = odom.header.stamp
+        pose.header.frame_id = odom.header.frame_id
+        pose.pose = odom.pose.pose
+        self.pose_pub.publish(pose)
 
-        odom_stamp = self.latest_odom.header.stamp
-        pos = self.latest_odom.pose.pose.position
-        ori = self.latest_odom.pose.pose.orientation
+        q = odom.pose.pose.orientation
+        yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        c, s = math.cos(yaw), math.sin(yaw)
+        vb = odom.twist.twist.linear
 
-        # 1. Forward 6-DOF Pose in Inertial Frame ('map')
-        pose_msg = PoseStamped()
-        pose_msg.header.stamp = odom_stamp
-        pose_msg.header.frame_id = 'map'
-        pose_msg.pose.position = pos
-        pose_msg.pose.orientation = ori
-        self.vision_pose_pub.publish(pose_msg)
+        twist = TwistWithCovarianceStamped()
+        twist.header.stamp = odom.header.stamp
+        twist.header.frame_id = odom.header.frame_id
+        twist.twist.twist.linear.x = c * vb.x - s * vb.y
+        twist.twist.twist.linear.y = s * vb.x + c * vb.y
+        twist.twist.twist.linear.z = vb.z
 
-        # 2. Extract Body Twist and Rotate to Inertial ENU ('map')
-        # Standard ROS odometry child_frame_id is 'base_link'
-        vx_b = self.latest_odom.twist.twist.linear.x
-        vy_b = self.latest_odom.twist.twist.linear.y
-        vz_b = self.latest_odom.twist.twist.linear.z
-
-        # Extract yaw from incoming ENU quaternion
-        siny_cosp = 2.0 * (ori.w * ori.z + ori.x * ori.y)
-        cosy_cosp = 1.0 - 2.0 * (ori.y * ori.y + ori.z * ori.z)
-        yaw = math.atan2(siny_cosp, cosy_cosp)
-
-        vx_enu = math.cos(yaw) * vx_b - math.sin(yaw) * vy_b
-        vy_enu = math.sin(yaw) * vx_b + math.cos(yaw) * vy_b
-        vz_enu = vz_b
-
-        twist_msg = TwistWithCovarianceStamped()
-        twist_msg.header.stamp = odom_stamp
-        twist_msg.header.frame_id = 'map'
-        twist_msg.twist.twist.linear.x = vx_enu
-        twist_msg.twist.twist.linear.y = vy_enu
-        twist_msg.twist.twist.linear.z = vz_enu
-
-        # Honest constant measurement covariance for VIO
+        rot = ((c, -s, 0.0), (s, c, 0.0), (0.0, 0.0, 1.0))
+        cb = odom.twist.covariance
         cov = [0.0] * 36
-        cov[0] = 0.02
-        cov[7] = 0.02
-        cov[14] = 0.02
-        twist_msg.twist.covariance = cov
-        self.vision_speed_pub.publish(twist_msg)
+        for i in range(3):
+            for j in range(3):
+                cov[i * 6 + j] = sum(rot[i][k] * cb[k * 6 + l] * rot[j][l]
+                                     for k in range(3) for l in range(3))
+        twist.twist.covariance = cov
+        self.twist_pub.publish(twist)
 
 
 def main(args=None):
@@ -99,7 +71,8 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
