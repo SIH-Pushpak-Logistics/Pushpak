@@ -14,7 +14,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
     ],
-    install_requires=['setuptools', 'message_filters', 'scipy'],
+    install_requires=['setuptools', 'message_filters'],
     zip_safe=True,
     maintainer='Architect',
     maintainer_email='manager@college.ac.in',
@@ -27,8 +27,6 @@ setup(
             'perception_node = navigation_brain.perception_node:main',
             'sim_radar_emulator_node = navigation_brain.sim_radar_emulator_node:main',
             'vio_bridge_node = navigation_brain.vio_bridge_node:main',
-            'vision_nav_node = navigation_brain.vision_nav_node:main',
-            'yolo_node = navigation_brain.yolo_node:main',
         ],
     },
 )
