@@ -22,9 +22,9 @@ def generate_launch_description():
 
     # 1. Enforce the Global Time Domain & Sensor Resolution
     use_sim_time = LaunchConfiguration('use_sim_time', default='true')
-    camera_rate = LaunchConfiguration('camera_rate', default='15')
-    camera_width = LaunchConfiguration('camera_width', default='160')
-    camera_height = LaunchConfiguration('camera_height', default='120')
+    camera_rate = LaunchConfiguration('camera_rate', default='30')
+    camera_width = LaunchConfiguration('camera_width', default='320')
+    camera_height = LaunchConfiguration('camera_height', default='240')
 
     # 2. Boot the Transform Tree
     robot_state_publisher = Node(
@@ -128,10 +128,10 @@ def generate_launch_description():
         DeclareLaunchArgument('drone_id', default_value='1',
                               description='Zenoh drone_id of this vehicle'),
         DeclareLaunchArgument(
-            'camera_rate', default_value='15',
-            description='Camera update rate in Hz. 15 suits software-rendered hosts; pass 30 on GPU hosts.'),
-        DeclareLaunchArgument('camera_width', default_value='160', description='Camera image width in pixels'),
-        DeclareLaunchArgument('camera_height', default_value='120', description='Camera image height in pixels'),
+            'camera_rate', default_value='30',
+            description='Camera update rate in Hz'),
+        DeclareLaunchArgument('camera_width', default_value='320', description='Camera image width in pixels'),
+        DeclareLaunchArgument('camera_height', default_value='240', description='Camera image height in pixels'),
         robot_state_publisher,
         gz_sim,
         spawn_entity_harmonic,
