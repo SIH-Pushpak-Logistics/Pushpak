@@ -456,7 +456,7 @@ State these before judges find them.
 7. **No flight hardware is built.** Hardware evidence is a hand-carried desk rig: Jetson Orin
    Nano, USB camera, an unarmed ArduPilot FC as IMU, and optionally an IWR6843 radar. Drone B
    is a design target: estimated 600–760 g all-up and 5–7 minutes' endurance. Sub-GHz HaLow
-   is a design target; the rig uses a standard Wi-Fi router.
+   is a design target; the rig uses a standard Wi-Fi router. Tested 26 Sep: an Android hotspot and campus Wi-Fi both block device-to-device traffic (client isolation), and the two-laptop Zenoh test passed only on a laptop-hosted access point. The demo brings its own network and checks it with a two-machine ping before any Zenoh run.
 
 ---
 
@@ -477,7 +477,7 @@ A tripwire is decided in advance and executed without debate when its deadline p
 
 | # | Tripwire | Deadline | Fallback |
 |---|---|---|---|
-| T-1 | Two laptops not exchanging `Heartbeat` on `pushpak/heartbeat/{drone_id}` (Zenoh 1.0.0, peer mode, no router) | end of Sun 27 Sep | Telemetry moves to Python `eclipse-zenoh` 1.0.0 with the same proto and keys. Rust crate work stops. |
+| T-1 | Two laptops not exchanging `Heartbeat` on `pushpak/heartbeat/{drone_id}` (Zenoh 1.0.0, peer mode, no router) | **passed 26 Sep** on `f2d1463`: Ubuntu + Mac on a laptop-hosted access point, peer loss detected in 1.78 s | Telemetry moves to Python `eclipse-zenoh` 1.0.0 with the same proto and keys. Rust crate work stops. |
 | T-2 | Jetson not physically present | end of Sun 27 Sep | HITL is out. `pushpak_peer` runs on T-1's second laptop, so the second peer is still a separate machine. |
 | T-3 | TI radar not streaming a point cloud on the Jetson | 24 h after the Jetson is first powered | Radar leaves the rig: camera + YOLO + Zenoh, FC as IMU. No hardware is ordered. |
 | T-4 | `rclrs` not building in the container | fired Day 2 (§1) | `pushpak_brain` is Python. |
