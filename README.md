@@ -442,7 +442,7 @@ State these before judges find them.
    is the paper's best-case RMSE. The bias sweep is a bounded stress test, not a measured
    radar property. Under zero-velocity hover the predicted drift is b·t: 3 m at 60 s for
    0.05 m/s, 6 m for 0.10 m/s. Mounting-angle and scale-factor errors scale with speed and
-   vanish in hover, so the hover gate does not test them. Demo runs are bounded to 90 s.
+   vanish in hover, so the hover gate does not test them. Demo runs are bounded to 90 s. Measured 27 Sep (§17): drift tracked b·t within 0.3 m while the EKF's velocity covariance was identical at every bias value. A constant bias is invisible to the filter; FS-3 catches sensor faults, never bias.
 2. **Radar is emulated** from simulator body velocity plus noise and bias. We test filter
    behaviour under noise, not radar physics.
 3. **Heading drifts, but barely in simulation.** Absolute yaw is never fused (§6). With datasheet white noise and no injected gyro bias (S-7), simulated heading drifts about 0.02° per minute; on hardware, gyro bias dominates.
@@ -453,7 +453,7 @@ State these before judges find them.
 6. **The v0.1 fallback** navigates on ground-truth ExtNav and is labelled as such. It can
    no longer be rebuilt from its Dockerfile (upstream withdrew the Humble MAVROS binaries);
    the recorded demo is the artefact.
-7. **No flight hardware is built.** Hardware evidence is a hand-carried desk rig: Jetson Orin
+7. **No flight hardware is built.** Hardware evidence is a hand-carried desk rig: a laptop in place of the Jetson Orin
    Nano, USB camera, an unarmed ArduPilot FC as IMU, and optionally an IWR6843 radar. Drone B
    is a design target: estimated 600–760 g all-up and 5–7 minutes' endurance. Sub-GHz HaLow
    is a design target; the rig uses a standard Wi-Fi router. Tested 26 Sep: an Android hotspot and campus Wi-Fi both block device-to-device traffic (client isolation), and the two-laptop Zenoh test passed only on a laptop-hosted access point. The demo brings its own network and checks it with a two-machine ping before any Zenoh run.
@@ -465,11 +465,10 @@ State these before judges find them.
 | Item | Owner | Due |
 |---|---|---|
 | Laplacian-variance dust threshold | Raunak | Day 3 |
-| `backtrack_cov_threshold`, recorded with the `process_noise_covariance` it was derived from (§17) | Ashutosh | Day 4 (hover gate) |
 | Hardware inventory and rig tier (1/2/3) | Kanishk | Day 1, **overdue** |
 | HaLow channel-plan legality in India (design target) | Kanishk | before the deck freezes |
-| `pushpak_brain` Python skeleton: zero-velocity hold, full topic/param contract. Required by the Phase 3 hover gate: with no `cmd_vel` writer, FS-4 lands the vehicle 1 s after airborne | Ashutosh | Day 3 |
 | Pin rustc 1.98.1 in `Dockerfile`; delete build dirs in the same layer to shrink the image | Ashutosh | next Dockerfile change |
+| ArduPilot SITL panics on entering LAND (`Location::get_alt_cm` on an uninitialised location): the FCU reports lat/lon 0 during flight although EKF3 logs "origin set". FS-4 and FS_EKF LAND therefore freeze SITL; FS-4 detection and the LAND request are verified | Ashutosh | before recording the FS-4 clip |
 
 ### Tripwires
 
@@ -478,10 +477,11 @@ A tripwire is decided in advance and executed without debate when its deadline p
 | # | Tripwire | Deadline | Fallback |
 |---|---|---|---|
 | T-1 | Two laptops not exchanging `Heartbeat` on `pushpak/heartbeat/{drone_id}` (Zenoh 1.0.0, peer mode, no router) | **passed 26 Sep** on `f2d1463`: Ubuntu + Mac on a laptop-hosted access point, peer loss detected in 1.78 s | Telemetry moves to Python `eclipse-zenoh` 1.0.0 with the same proto and keys. Rust crate work stops. |
-| T-2 | Jetson not physically present | end of Sun 27 Sep | HITL is out. `pushpak_peer` runs on T-1's second laptop, so the second peer is still a separate machine. |
+| T-2 | Jetson not physically present | **fired 27 Sep** | No Jetson. The desk rig runs on Kanishk's laptop instead (T-6). `pushpak_peer` on a second laptop still proves decentralization. |
 | T-3 | TI radar not streaming a point cloud on the Jetson | 24 h after the Jetson is first powered | Radar leaves the rig: camera + YOLO + Zenoh, FC as IMU. No hardware is ordered. |
 | T-4 | `rclrs` not building in the container | fired Day 2 (§1) | `pushpak_brain` is Python. |
 | T-5 | `collapse.sdf` not merged | Day 6 | Demo runs in `swarm.sdf`; S-5 stays, and the deck says so. |
+| T-6 | Desk rig (laptop + ArduPilot FC as IMU + USB camera, `perception_node` live) not producing real detections on the dashboard | end of 29 Sep | Submit without rig footage; hardware is described as a design target only. |
 
 Only one `pushpak_brain` implementation is ever launched (I-3).
 
@@ -524,3 +524,28 @@ IMU citation (S-7, ICM-42688-P DS-000347 r1.6) and the radar citation (§15).
 `/sim/fault/radar` true, visual absent in both, which is the FS-3 condition. The threshold
 sits between the two and is recorded with the `process_noise_covariance` it came from.
 Changing Q invalidates it.
+
+**Result, 27 Sep (`feat/estimation-ekf` 4e8e72b, seeds 1, RTF ≈ 0.95): PASS.**
+
+| bias_initial_x | predicted b·60 s | measured d(60 s) | error | slope |
+|---|---|---|---|---|
+| 0 | 0 m | 0.280 m | +0.28 m | 0.31 m/min |
+| 0.05 m/s | 3.00 m | 3.196 m | +0.20 m | 3.33 m/min |
+| 0.10 m/s | 6.00 m | 6.193 m | +0.19 m | 6.33 m/min |
+
+GUIDED and armed throughout all three runs; yaw offset at t₀ ≤ 0.02°. In the 0.10 m/s run the
+estimate moved 0.15 m while the vehicle truly moved 6.19 m. The shared ~0.2 m error is the common
+white-noise realisation (same seed in every run). Vertical hold: ToF 1.41–1.69 m (std 0.053 m) at a
+1.5 m takeoff target. Only `sim_radar_emulator_node` and the bag recorder subscribed to
+`/sim/ground_truth/odom`; `pushpak_brain` was the only `cmd_vel` publisher. Bags, `ros2 topic info`
+captures and drift CSVs: shared drive, `phase3_hover_gate_2026-09-27`. Evaluator:
+`tools/eval_hover_gate.py`.
+
+**`backtrack_cov_threshold` = 0.2** (trace of the linear-velocity covariance, m²/s²). Healthy:
+median 0.020, max 0.023. Radar faulted, visual absent: 0.094 at +0.5 s, 0.185 at +1 s, 0.42 at
++2 s, 2.2 at +5 s, 8.4 at +10 s; back to 0.023 within 2 s of the fault clearing. The threshold is
+about 9× the healthy maximum and is crossed about 1 s after radar loss. Growth is faster than
+linear because the unobserved acceleration states feed velocity (accelerations are not fused).
+Derived with Q = robot_localization's shipped default diagonal
+[0.05, 0.05, 0.06, 0.03, 0.03, 0.06, 0.025, 0.025, 0.04, 0.01, 0.01, 0.02, 0.01, 0.01, 0.015];
+changing Q or the fusion matrix invalidates it.

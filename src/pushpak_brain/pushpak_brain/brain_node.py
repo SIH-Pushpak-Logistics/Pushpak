@@ -18,7 +18,7 @@ PARAMS = [
     ('survivor_dedup_radius_m', 1.5),
     ('isolation_timeout_s', 2.0),
     ('visual_dropout_variance', 1e6),
-    ('backtrack_cov_threshold', NAN),
+    ('backtrack_cov_threshold', 0.2),
     ('backtrack_speed_mps', 1.0),
     ('backtrack_accept_radius_m', 0.4),
 ]
