@@ -93,7 +93,7 @@ class ImageQualityEvaluator:
 
     def __init__(
         self,
-        baseline: float = 0.0,
+        baseline: float = 453.151,
         ratio_threshold: float = 0.30,
     ):
         self.baseline = float(baseline)
