@@ -34,6 +34,7 @@ from navigation_brain.perception_core import (
     CameraIntrinsics,
     CovarianceRamp,
     ImageQualityEvaluator,
+    ImageQualityResult,
     OpticalFlowTracker,
     WorldProjector,
 )
@@ -51,8 +52,8 @@ class PerceptionNode(Node):
     ROS 2 perception node implementing dual-pipeline visual navigation and survivor detection.
     """
 
-    def __init__(self):
-        super().__init__('perception_node')
+    def __init__(self, node_name: str = 'perception_node', **kwargs):
+        super().__init__(node_name, **kwargs)
 
         # ---------------------------------------------------------
         # Parameters
@@ -63,8 +64,13 @@ class PerceptionNode(Node):
         self.declare_parameter('conf_threshold', 0.85)
         self.declare_parameter('max_rate_hz', 2.0)
         self.declare_parameter('odom_staleness_sec', 0.5)
-        self.declare_parameter('laplacian_baseline', 453.151)
+        self.declare_parameter('laplacian_baseline', 0.0)
+        self.declare_parameter('laplacian_baseline_frames', 30)
+        self.declare_parameter('laplacian_calibration_min_altitude_m', 1.0)
         self.declare_parameter('laplacian_ratio_threshold', 0.30)
+        self.declare_parameter('nominal_covariance', 0.05)
+        self.declare_parameter('degraded_covariance', 1.0e6)
+        self.declare_parameter('ramp_frames', 5)
         self.declare_parameter('detection_dir', '/workspace/detections')
 
         self.model_path = self.get_parameter('model_path').get_parameter_value().string_value
@@ -74,10 +80,23 @@ class PerceptionNode(Node):
         self.max_rate_hz = self.get_parameter('max_rate_hz').get_parameter_value().double_value
         self.odom_staleness_sec = self.get_parameter('odom_staleness_sec').get_parameter_value().double_value
         self.laplacian_baseline = self.get_parameter('laplacian_baseline').get_parameter_value().double_value
+        self.laplacian_baseline_frames = max(
+            1,
+            self.get_parameter('laplacian_baseline_frames').get_parameter_value().integer_value,
+        )
+        self.laplacian_calibration_min_altitude_m = self.get_parameter('laplacian_calibration_min_altitude_m').get_parameter_value().double_value
         self.laplacian_ratio_threshold = self.get_parameter('laplacian_ratio_threshold').get_parameter_value().double_value
+        self.nominal_covariance = self.get_parameter('nominal_covariance').get_parameter_value().double_value
+        self.degraded_covariance = self.get_parameter('degraded_covariance').get_parameter_value().double_value
+        self.ramp_frames = self.get_parameter('ramp_frames').get_parameter_value().integer_value
         self.detection_dir = self.get_parameter('detection_dir').get_parameter_value().string_value
 
         self.min_yolo_period_sec = 1.0 / max(0.1, self.max_rate_hz)
+
+        # Baseline auto-calibration state
+        self.auto_calibrate_baseline = (self.laplacian_baseline <= 0.0)
+        self.baseline_samples: list[float] = []
+        self.baseline_calibrated = not self.auto_calibrate_baseline
 
         # ---------------------------------------------------------
         # Core Pure-Python Mathematical Modules
@@ -87,9 +106,9 @@ class PerceptionNode(Node):
             ratio_threshold=self.laplacian_ratio_threshold,
         )
         self.covariance_ramp = CovarianceRamp(
-            nominal_covariance=0.05,
-            degraded_covariance=1.0e6,
-            ramp_frames=5,
+            nominal_covariance=self.nominal_covariance,
+            degraded_covariance=self.degraded_covariance,
+            ramp_frames=self.ramp_frames,
         )
         self.flow_tracker = OpticalFlowTracker(
             max_corners=250,
@@ -302,10 +321,7 @@ class PerceptionNode(Node):
         # 2. Queue latest color frame for Pipeline B
         self._queue_yolo_frame(bgr_frame, image_stamp)
 
-        # 3. Evaluate image quality (dust/blur degradation)
-        quality_result = self.quality_evaluator.evaluate(gray)
-
-        # 4. Snapshot sensor state
+        # 3. Snapshot sensor state
         with self.state_lock:
             camera_ready = self.camera_info_ready
             intrinsics = self.intrinsics
@@ -315,8 +331,6 @@ class PerceptionNode(Node):
             gyro_y = self.latest_gyro_y
             gyro_stamp = self.latest_gyro_stamp
 
-        # 5. Check sensor prerequisites
-        intrinsics_valid = camera_ready and intrinsics is not None and intrinsics.fx > 0.0
         altitude_valid = (
             altitude is not None
             and altitude_stamp is not None
@@ -324,6 +338,42 @@ class PerceptionNode(Node):
             and math.isfinite(altitude)
             and altitude > 0.0
         )
+        is_airborne = altitude_valid and (altitude >= self.laplacian_calibration_min_altitude_m)
+
+        # 4. Evaluate image quality (dust/blur degradation) and auto-calibrate if needed
+        variance = ImageQualityEvaluator.compute_variance(gray)
+
+        if not self.baseline_calibrated:
+            # Calibration samples must only be collected when airborne (altitude >= min_altitude)
+            if is_airborne and variance > 0.0 and math.isfinite(variance):
+                self.baseline_samples.append(variance)
+                if len(self.baseline_samples) >= self.laplacian_baseline_frames:
+                    median_val = float(np.median(self.baseline_samples))
+                    self.laplacian_baseline = max(1e-6, median_val)
+                    self.quality_evaluator.baseline = self.laplacian_baseline
+                    self.baseline_calibrated = True
+                    self.get_logger().info(
+                        f"Laplacian baseline auto-calibrated to {self.laplacian_baseline:.3f} "
+                        f"from {len(self.baseline_samples)} airborne frames "
+                        f"(min_alt={self.laplacian_calibration_min_altitude_m:.1f}m)."
+                    )
+
+            if not self.baseline_calibrated:
+                # UNCALIBRATED MUST BE DEGRADED:
+                # While calibration is incomplete, report degraded state so degraded covariance
+                # is assigned and EKF ignores visual velocity until baseline is established.
+                quality_result = ImageQualityResult(
+                    variance=variance,
+                    ratio=0.0,
+                    is_degraded=True,
+                )
+            else:
+                quality_result = self.quality_evaluator.evaluate(gray)
+        else:
+            quality_result = self.quality_evaluator.evaluate(gray)
+
+        # 5. Check sensor prerequisites
+        intrinsics_valid = camera_ready and intrinsics is not None and intrinsics.fx > 0.0
         gyro_valid = (
             gyro_stamp is not None
             and 0.0 <= (image_stamp - gyro_stamp) <= 0.5
@@ -522,18 +572,26 @@ class PerceptionNode(Node):
                 self.get_logger().warning(f"Failed to write detection crop: {exc}")
                 crop_path = ''
 
+        # Check fresh odometry - if missing or stale, crop is saved and warning logged,
+        # but SurvivorDetection publication is skipped.
+        odom = self._get_fresh_odom()
+        if odom is None:
+            return
+
         # Compute 3D world position
-        world_pt = self._calculate_world_position(center_u, center_v, image_stamp, w, h)
+        world_pt = self._calculate_world_position(center_u, center_v, image_stamp, w, h, odom=odom)
+        if world_pt is None:
+            return
 
         msg = SurvivorDetection()
         msg.header.stamp = self._sec_to_stamp(image_stamp)
-        msg.header.frame_id = 'base_link'
+        msg.header.frame_id = str(odom.header.frame_id)
         msg.confidence = float(confidence)
         msg.bbox_x = float(x1_c)
         msg.bbox_y = float(y1_c)
         msg.bbox_w = float(bbox_w)
         msg.bbox_h = float(bbox_h)
-        msg.world_position = world_pt if world_pt is not None else Point()
+        msg.world_position = world_pt
         msg.image_path = crop_path
 
         self.detection_pub.publish(msg)
@@ -545,6 +603,7 @@ class PerceptionNode(Node):
         image_stamp: float,
         image_width: int,
         image_height: int,
+        odom: Optional[Odometry] = None,
     ) -> Optional[Point]:
         """
         Calculate ground survivor position in odom frame.
@@ -569,7 +628,8 @@ class PerceptionNode(Node):
             return None
 
         # Verify odometry freshness (<= 0.5s)
-        odom = self._get_fresh_odom()
+        if odom is None:
+            odom = self._get_fresh_odom()
         if odom is None:
             return None
 

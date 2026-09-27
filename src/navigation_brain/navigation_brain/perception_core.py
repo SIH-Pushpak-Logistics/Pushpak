@@ -93,11 +93,30 @@ class ImageQualityEvaluator:
 
     def __init__(
         self,
-        baseline: float = 453.151,
+        baseline: float,
         ratio_threshold: float = 0.30,
     ):
         self.baseline = float(baseline)
         self.ratio_threshold = float(ratio_threshold)
+
+    @staticmethod
+    def compute_variance(gray: np.ndarray) -> float:
+        """
+        Compute raw Laplacian variance of a grayscale image.
+        """
+        if gray is None or gray.size == 0:
+            return 0.0
+
+        try:
+            laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+            variance = float(laplacian.var())
+        except (cv2.error, ValueError):
+            return 0.0
+
+        if not math.isfinite(variance) or variance < 0.0:
+            return 0.0
+
+        return variance
 
     def evaluate(self, gray: np.ndarray) -> ImageQualityResult:
         """
@@ -109,17 +128,9 @@ class ImageQualityEvaluator:
         Returns:
             ImageQualityResult with variance, baseline ratio, and degradation flag.
         """
-        if gray is None or gray.size == 0:
-            return ImageQualityResult(variance=0.0, ratio=0.0, is_degraded=True)
-
-        try:
-            laplacian = cv2.Laplacian(gray, cv2.CV_64F)
-            variance = float(laplacian.var())
-        except (cv2.error, ValueError):
-            return ImageQualityResult(variance=0.0, ratio=0.0, is_degraded=True)
-
-        if not math.isfinite(variance) or variance < 0.0 or self.baseline <= 0.0:
-            return ImageQualityResult(variance=0.0, ratio=0.0, is_degraded=True)
+        variance = self.compute_variance(gray)
+        if variance <= 0.0 or self.baseline <= 0.0:
+            return ImageQualityResult(variance=variance, ratio=0.0, is_degraded=True)
 
         ratio = variance / self.baseline
         is_degraded = (not math.isfinite(ratio)) or (ratio < self.ratio_threshold)
