@@ -17,6 +17,7 @@ builds `drone_interfaces`:
 
 ```bash
 cargo test --locked --manifest-path hitl/zenoh_publisher/Cargo.toml
+cargo build --locked --manifest-path hitl/zenoh_publisher/Cargo.toml
 cargo build --release --locked --manifest-path hitl/zenoh_publisher/Cargo.toml
 python3 -m unittest discover -s hitl/zenoh_publisher -p 'test_*.py' -v
 ```
