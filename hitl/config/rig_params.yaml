@@ -1,0 +1,94 @@
+mavros:
+  ros__parameters:
+    fcu_url: serial:///dev/pushpak-fc:921600
+    gcs_url: ""
+    target_system_id: 1
+    target_component_id: 1
+    # Physical rig needs DISTANCE_SENSOR messages; the base SITL file disables them.
+    plugin_denylist:
+      - fake_gps
+      - gps_input
+      - gps_rtk
+      - gps_status
+      - hil
+      - mocap_pose_estimate
+      - odometry
+      - landing_target
+      - sim_state
+      - setpoint_position
+      - setpoint_raw
+      - setpoint_accel
+      - setpoint_attitude
+      - setpoint_trajectory
+      - trajectory
+      - manual_control
+      - rc_io
+      - waypoint
+      - rallypoint
+
+/**/distance_sensor:
+  ros__parameters:
+    config: |
+      rangefinder_pub:
+        id: 0
+        frame_id: "tof_link"
+        orientation: PITCH_270
+        field_of_view: 0.471
+        send_tf: false
+        sensor_position: {x: 0.0, y: 0.0, z: -0.05}
+
+/camera/usb_camera:
+  ros__parameters:
+    video_device: /dev/pushpak-camera
+    image_size: [640, 480]
+    pixel_format: YUYV
+    output_encoding: bgr8
+    time_per_frame: [1, 30]
+    camera_frame_id: camera_link
+    camera_info_url: file:///opt/pushpak/camera_info.yaml
+
+altimeter_node:
+  ros__parameters:
+    use_sim_time: false
+    input_mode: range
+
+ekf_node:
+  ros__parameters:
+    use_sim_time: false
+    # MAVROS data_raw has angular rates and acceleration, not a trusted attitude.
+    imu0_config: [false, false, false,
+                  false, false, false,
+                  false, false, false,
+                  true, true, true,
+                  true, true, true]
+
+perception_node:
+  ros__parameters:
+    use_sim_time: false
+    model_path: /opt/pushpak/yolov8n.pt
+    device: cuda:0
+    imgsz: 320
+    conf_threshold: 0.85
+    max_rate_hz: 2.0
+    odom_staleness_sec: 0.5
+    laplacian_baseline: 0.0
+    laplacian_baseline_frames: 30
+    laplacian_calibration_min_altitude_m: 1.0
+    laplacian_ratio_threshold: 0.30
+    nominal_covariance: 0.05
+    degraded_covariance: 1000000.0
+    ramp_frames: 5
+    detection_dir: /opt/pushpak/detections
+
+hitl_zenoh_publisher:
+  ros__parameters:
+    use_sim_time: false
+    drone_id: 2
+    pose_source: odometry
+    max_odom_age_s: 0.5
+    rust_binary: /opt/pushpak/hitl/zenoh_publisher/target/release/pushpak_hitl_zenoh_publisher
+    connect_endpoints:
+      - tcp/192.168.8.10:7447
+      - tcp/192.168.8.11:7447
+    listen_endpoints:
+      - tcp/0.0.0.0:7447

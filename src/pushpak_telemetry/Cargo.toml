@@ -1,0 +1,46 @@
+[package]
+name = "pushpak_telemetry"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+prost = "0.13"
+serde_json = "1"
+thiserror = "1"
+zenoh = "=1.0.0"
+
+# zenoh 1.0.0 published its internal crates with caret requirements. Keep the
+# complete release family on 1.0.0 so a fresh build cannot mix in newer,
+# source-incompatible 1.x internals.
+zenoh-buffers = "=1.0.0"
+zenoh-codec = "=1.0.0"
+zenoh-collections = "=1.0.0"
+zenoh-config = "=1.0.0"
+zenoh-core = "=1.0.0"
+zenoh-crypto = "=1.0.0"
+zenoh-keyexpr = "=1.0.0"
+zenoh-link = "=1.0.0"
+zenoh-link-commons = "=1.0.0"
+zenoh-link-quic = "=1.0.0"
+zenoh-link-tcp = "=1.0.0"
+zenoh-link-tls = "=1.0.0"
+zenoh-link-udp = "=1.0.0"
+zenoh-link-unixsock_stream = "=1.0.0"
+zenoh-link-ws = "=1.0.0"
+zenoh-macros = "=1.0.0"
+zenoh-plugin-trait = "=1.0.0"
+zenoh-protocol = "=1.0.0"
+zenoh-result = "=1.0.0"
+zenoh-runtime = "=1.0.0"
+zenoh-sync = "=1.0.0"
+zenoh-task = "=1.0.0"
+zenoh-transport = "=1.0.0"
+zenoh-util = "=1.0.0"
+
+[build-dependencies]
+prost-build = "0.13"
+protoc-bin-vendored = "3"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }

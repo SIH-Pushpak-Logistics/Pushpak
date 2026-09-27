@@ -38,7 +38,7 @@ export const LiveTelemetry: React.FC<Props> = ({ state }) => {
           </div>
         </div>
         <div className="metric-item">
-          <div className="metric-label">Altitude AGL</div>
+          <div className="metric-label">Height (odom frame)</div>
           <div className="metric-value mono">
             {altitude ? altitude.z.toFixed(2) : (pose ? pose.z.toFixed(2) : '--')} m
           </div>

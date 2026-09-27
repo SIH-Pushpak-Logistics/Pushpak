@@ -1,32 +1,43 @@
-# React + TypeScript + Vite
+# Pushpak v2 dashboard
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+The browser consumes snapshots from `tools/zenoh_gateway.py`. Redis is not used.
+The gateway is ground peer **0** and tracks scout **1** and rig **2** by default.
 
-Currently, two official plugins are available:
+From the repository root:
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```sh
+python -m pip install -r tools/requirements-gateway.txt
+python tools/zenoh_gateway.py --connect tcp/SCOUT_IP:7447 --connect tcp/RIG_IP:7447
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+In another terminal:
+
+```sh
+cd dashboard
+npm ci
+npm run dev
+```
+
+`npm run server` also starts the gateway using Python on PATH. To restrict its
+vehicles, repeat `--drone-id` (for example `--drone-id 1 --drone-id 2`).
+For a browser on another machine, bind the gateway with `--host 0.0.0.0` and set
+`VITE_WS_URL=ws://GROUND_IP:8765` when starting/building Vite. HTTPS needs a WSS proxy.
+
+Select scout or rig in the header. Both link states remain visible. Their tracks
+are kept separate because each odom origin may differ. A browser WebSocket connection
+is separate from the vehicle heartbeat status. Heartbeats expire after 1.75 s;
+poses disappear after 0.75 s without a keyframe. Detections remain as observations.
+Coordinates are metres in odom, yaw is degrees, confidence is a fraction.
+Height is odom Z, **not** a ToF AGL measurement. RSSI, cache count, velocity,
+flow diagnostics, images and acknowledgements are unavailable in the frozen wire
+schema and are not fabricated.
+
+`tools/pushpak.desc` is generated from the unchanged frozen schema:
+
+```sh
+protoc --proto_path=proto --descriptor_set_out=tools/pushpak.desc proto/pushpak.proto
+```
+
+The gateway caches at most 1,000 survivor IDs per vehicle and sends bounded
+fleet snapshots at 5 Hz. IDs are scoped by vehicle; distinct vehicle odom origins
+are not assumed to be aligned. Raw peer tests still use `src/pushpak_peer`.

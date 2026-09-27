@@ -1,0 +1,28 @@
+
+²
+pushpak.protoswarm.telemetry"–
+SubMapKeyframe!
+timestamp_ms (RtimestampMs
+drone_id (RdroneId
+pos_x_mm (RposXMm
+pos_y_mm (RposYMm
+pos_z_mm (RposZMm
+	roll_cdeg (RrollCdeg
+
+pitch_cdeg (R	pitchCdeg
+yaw_cdeg (RyawCdeg!
+status_flags	 (RstatusFlags"€
+SurvivorEvent!
+timestamp_ms (RtimestampMs
+drone_id (RdroneId
+survivor_id (R
+survivorId
+pos_x_mm (RposXMm
+pos_y_mm (RposYMm
+pos_z_mm (RposZMm%
+confidence_pct (RconfidencePct
+	hit_count (RhitCount"l
+	Heartbeat!
+timestamp_ms (RtimestampMs
+drone_id (RdroneId!
+status_flags (RstatusFlagsbproto3

@@ -13,3 +13,5 @@
 *.jpg binary
 *.dae binary
 *.stl binary
+# Protobuf descriptor sets must retain exact wire bytes.
+*.desc binary
