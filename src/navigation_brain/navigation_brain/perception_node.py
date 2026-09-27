@@ -66,6 +66,7 @@ class PerceptionNode(Node):
         self.declare_parameter('odom_staleness_sec', 0.5)
         self.declare_parameter('laplacian_baseline', 0.0)
         self.declare_parameter('laplacian_baseline_frames', 30)
+        self.declare_parameter('laplacian_calibration_min_altitude_m', 1.0)
         self.declare_parameter('laplacian_ratio_threshold', 0.30)
         self.declare_parameter('nominal_covariance', 0.05)
         self.declare_parameter('degraded_covariance', 1.0e6)
@@ -83,6 +84,7 @@ class PerceptionNode(Node):
             1,
             self.get_parameter('laplacian_baseline_frames').get_parameter_value().integer_value,
         )
+        self.laplacian_calibration_min_altitude_m = self.get_parameter('laplacian_calibration_min_altitude_m').get_parameter_value().double_value
         self.laplacian_ratio_threshold = self.get_parameter('laplacian_ratio_threshold').get_parameter_value().double_value
         self.nominal_covariance = self.get_parameter('nominal_covariance').get_parameter_value().double_value
         self.degraded_covariance = self.get_parameter('degraded_covariance').get_parameter_value().double_value
@@ -122,8 +124,6 @@ class PerceptionNode(Node):
         # State and Synchronization
         # ---------------------------------------------------------
         self.bridge = CvBridge()
-        if hasattr(self.bridge, 'cvtype_to_name') and 16 not in self.bridge.cvtype_to_name:
-            self.bridge.cvtype_to_name[16] = '8UC3'
         self.state_lock = threading.Lock()
 
         self.intrinsics: Optional[CameraIntrinsics] = None
@@ -321,33 +321,7 @@ class PerceptionNode(Node):
         # 2. Queue latest color frame for Pipeline B
         self._queue_yolo_frame(bgr_frame, image_stamp)
 
-        # 3. Evaluate image quality (dust/blur degradation) and auto-calibrate if needed
-        variance = ImageQualityEvaluator.compute_variance(gray)
-
-        if not self.baseline_calibrated:
-            if variance > 0.0 and math.isfinite(variance):
-                self.baseline_samples.append(variance)
-                if len(self.baseline_samples) >= self.laplacian_baseline_frames:
-                    median_val = float(np.median(self.baseline_samples))
-                    self.laplacian_baseline = max(1e-6, median_val)
-                    self.quality_evaluator.baseline = self.laplacian_baseline
-                    self.baseline_calibrated = True
-                    self.get_logger().info(
-                        f"Laplacian baseline auto-calibrated to {self.laplacian_baseline:.3f} "
-                        f"from {len(self.baseline_samples)} frames."
-                    )
-            if not self.baseline_calibrated:
-                quality_result = ImageQualityResult(
-                    variance=variance,
-                    ratio=1.0,
-                    is_degraded=False,
-                )
-            else:
-                quality_result = self.quality_evaluator.evaluate(gray)
-        else:
-            quality_result = self.quality_evaluator.evaluate(gray)
-
-        # 4. Snapshot sensor state
+        # 3. Snapshot sensor state
         with self.state_lock:
             camera_ready = self.camera_info_ready
             intrinsics = self.intrinsics
@@ -357,8 +331,6 @@ class PerceptionNode(Node):
             gyro_y = self.latest_gyro_y
             gyro_stamp = self.latest_gyro_stamp
 
-        # 5. Check sensor prerequisites
-        intrinsics_valid = camera_ready and intrinsics is not None and intrinsics.fx > 0.0
         altitude_valid = (
             altitude is not None
             and altitude_stamp is not None
@@ -366,6 +338,42 @@ class PerceptionNode(Node):
             and math.isfinite(altitude)
             and altitude > 0.0
         )
+        is_airborne = altitude_valid and (altitude >= self.laplacian_calibration_min_altitude_m)
+
+        # 4. Evaluate image quality (dust/blur degradation) and auto-calibrate if needed
+        variance = ImageQualityEvaluator.compute_variance(gray)
+
+        if not self.baseline_calibrated:
+            # Calibration samples must only be collected when airborne (altitude >= min_altitude)
+            if is_airborne and variance > 0.0 and math.isfinite(variance):
+                self.baseline_samples.append(variance)
+                if len(self.baseline_samples) >= self.laplacian_baseline_frames:
+                    median_val = float(np.median(self.baseline_samples))
+                    self.laplacian_baseline = max(1e-6, median_val)
+                    self.quality_evaluator.baseline = self.laplacian_baseline
+                    self.baseline_calibrated = True
+                    self.get_logger().info(
+                        f"Laplacian baseline auto-calibrated to {self.laplacian_baseline:.3f} "
+                        f"from {len(self.baseline_samples)} airborne frames "
+                        f"(min_alt={self.laplacian_calibration_min_altitude_m:.1f}m)."
+                    )
+
+            if not self.baseline_calibrated:
+                # UNCALIBRATED MUST BE DEGRADED:
+                # While calibration is incomplete, report degraded state so degraded covariance
+                # is assigned and EKF ignores visual velocity until baseline is established.
+                quality_result = ImageQualityResult(
+                    variance=variance,
+                    ratio=0.0,
+                    is_degraded=True,
+                )
+            else:
+                quality_result = self.quality_evaluator.evaluate(gray)
+        else:
+            quality_result = self.quality_evaluator.evaluate(gray)
+
+        # 5. Check sensor prerequisites
+        intrinsics_valid = camera_ready and intrinsics is not None and intrinsics.fx > 0.0
         gyro_valid = (
             gyro_stamp is not None
             and 0.0 <= (image_stamp - gyro_stamp) <= 0.5

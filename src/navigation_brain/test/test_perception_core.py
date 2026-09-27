@@ -93,7 +93,7 @@ class TestImageQualityEvaluator:
         assert result.is_degraded
 
     def test_empty_or_none_image(self):
-        evaluator = ImageQualityEvaluator()
+        evaluator = ImageQualityEvaluator(baseline=100.0)
         result = evaluator.evaluate(None)
         assert result.is_degraded
         assert result.variance == 0.0
@@ -101,6 +101,10 @@ class TestImageQualityEvaluator:
         empty_img = np.array([], dtype=np.uint8)
         result = evaluator.evaluate(empty_img)
         assert result.is_degraded
+
+    def test_baseline_is_required_argument(self):
+        with pytest.raises(TypeError):
+            ImageQualityEvaluator()
 
     def test_compute_variance_static_method(self):
         # Textured image should have positive finite variance

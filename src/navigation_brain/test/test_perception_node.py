@@ -20,13 +20,6 @@ from navigation_brain.perception_core import ImageQualityEvaluator
 from navigation_brain.perception_node import PerceptionNode
 
 
-def get_compatible_bridge():
-    bridge = CvBridge()
-    if hasattr(bridge, "cvtype_to_name") and 16 not in bridge.cvtype_to_name:
-        bridge.cvtype_to_name[16] = "8UC3"
-    return bridge
-
-
 @pytest.fixture(scope="module")
 def ros_context():
     rclpy.init()
@@ -70,7 +63,7 @@ def test_odom_freshness_rejection(ros_context):
 
 def test_continuous_velocity_publishing_on_degraded_stream(ros_context):
     node = PerceptionNode(node_name="test_continuous_vel")
-    bridge = get_compatible_bridge()
+    bridge = CvBridge()
 
     published_messages = []
     def vel_cb(msg):
@@ -384,16 +377,213 @@ def test_fresh_odometry_publishes_survivor_detection(ros_context, tmp_path):
 
 
 # =============================================================
-# Reviewer Item 3: Laplacian Baseline Auto-Calibration
+# Reviewer Items 1 & 2: Uncalibrated Must Be Degraded & Calibrate Only Airborne
 # =============================================================
 
+def test_uncalibrated_node_reports_degraded_state(ros_context, tmp_path):
+    bridge = CvBridge()
+    node = PerceptionNode(
+        node_name="test_uncalib_degraded",
+        parameter_overrides=[
+            Parameter("laplacian_baseline", Parameter.Type.DOUBLE, 0.0),
+            Parameter("laplacian_baseline_frames", Parameter.Type.INTEGER, 10),
+            Parameter("detection_dir", Parameter.Type.STRING, str(tmp_path)),
+        ],
+    )
+
+    published_messages = []
+    node.create_subscription(
+        TwistWithCovarianceStamped,
+        "/visual/velocity",
+        lambda m: published_messages.append(m),
+        10,
+    )
+
+    # Initial state: uncalibrated
+    assert node.auto_calibrate_baseline is True
+    assert node.baseline_calibrated is False
+
+    now = node.get_clock().now()
+    cinfo = CameraInfo()
+    cinfo.header.stamp = now.to_msg()
+    cinfo.width = 320
+    cinfo.height = 240
+    cinfo.k = [277.0, 0.0, 160.0, 0.0, 277.0, 120.0, 0.0, 0.0, 1.0]
+    node.camera_info_callback(cinfo)
+
+    rng = Range()
+    rng.header.stamp = now.to_msg()
+    rng.range = 2.0
+    node.range_callback(rng)
+
+    imu = Imu()
+    imu.header.stamp = now.to_msg()
+    node.imu_callback(imu)
+
+    # Feed 6 frames while uncalibrated: covariance must ramp up to degraded covariance (1.0e6)
+    textured = np.random.randint(0, 200, (240, 320, 3), dtype=np.uint8)
+    for i in range(6):
+        t = now + rclpy.time.Duration(seconds=i * 0.05)
+        rng.header.stamp = t.to_msg()
+        node.range_callback(rng)
+        imu.header.stamp = t.to_msg()
+        node.imu_callback(imu)
+
+        img_msg = bridge.cv2_to_imgmsg(textured, encoding="bgr8")
+        img_msg.header.stamp = t.to_msg()
+        node.image_callback(img_msg)
+        rclpy.spin_once(node, timeout_sec=0.01)
+
+    assert len(published_messages) == 6
+    # While uncalibrated, covariance must ramp to degraded (frame 5+ == 1.0e6)
+    assert published_messages[5].twist.covariance[0] == 1.0e6
+
+    node.destroy_node()
+
+
+def test_low_altitude_does_not_calibrate(ros_context, tmp_path):
+    bridge = CvBridge()
+    node = PerceptionNode(
+        node_name="test_low_alt_no_calib",
+        parameter_overrides=[
+            Parameter("laplacian_baseline", Parameter.Type.DOUBLE, 0.0),
+            Parameter("laplacian_baseline_frames", Parameter.Type.INTEGER, 5),
+            Parameter("laplacian_calibration_min_altitude_m", Parameter.Type.DOUBLE, 1.0),
+            Parameter("detection_dir", Parameter.Type.STRING, str(tmp_path)),
+        ],
+    )
+
+    now = node.get_clock().now()
+    cinfo = CameraInfo()
+    cinfo.header.stamp = now.to_msg()
+    cinfo.width = 320
+    cinfo.height = 240
+    cinfo.k = [277.0, 0.0, 160.0, 0.0, 277.0, 120.0, 0.0, 0.0, 1.0]
+    node.camera_info_callback(cinfo)
+
+    imu = Imu()
+    imu.header.stamp = now.to_msg()
+    node.imu_callback(imu)
+
+    # Ground altitude = 0.3m (below min 1.0m)
+    rng = Range()
+    rng.header.stamp = now.to_msg()
+    rng.range = 0.3
+    node.range_callback(rng)
+
+    # Feed 10 high-variance frames
+    frame = np.random.randint(0, 255, (240, 320, 3), dtype=np.uint8)
+    for i in range(10):
+        t = now + rclpy.time.Duration(seconds=i * 0.05)
+        rng.header.stamp = t.to_msg()
+        node.range_callback(rng)
+        img_msg = bridge.cv2_to_imgmsg(frame, encoding="bgr8")
+        img_msg.header.stamp = t.to_msg()
+        node.image_callback(img_msg)
+        rclpy.spin_once(node, timeout_sec=0.01)
+
+    # Zero calibration samples should be collected from ground frames
+    assert len(node.baseline_samples) == 0
+    assert node.baseline_calibrated is False
+    assert node.laplacian_baseline == 0.0
+
+    node.destroy_node()
+
+
+def test_airborne_altitude_calibrates_and_resumes_normal_evaluation(ros_context, tmp_path):
+    bridge = CvBridge()
+    node = PerceptionNode(
+        node_name="test_airborne_calib",
+        parameter_overrides=[
+            Parameter("laplacian_baseline", Parameter.Type.DOUBLE, 0.0),
+            Parameter("laplacian_baseline_frames", Parameter.Type.INTEGER, 5),
+            Parameter("laplacian_calibration_min_altitude_m", Parameter.Type.DOUBLE, 1.0),
+            Parameter("detection_dir", Parameter.Type.STRING, str(tmp_path)),
+        ],
+    )
+
+    published_messages = []
+    node.create_subscription(
+        TwistWithCovarianceStamped,
+        "/visual/velocity",
+        lambda m: published_messages.append(m),
+        10,
+    )
+
+    now = node.get_clock().now()
+    cinfo = CameraInfo()
+    cinfo.header.stamp = now.to_msg()
+    cinfo.width = 320
+    cinfo.height = 240
+    cinfo.k = [277.0, 0.0, 160.0, 0.0, 277.0, 120.0, 0.0, 0.0, 1.0]
+    node.camera_info_callback(cinfo)
+
+    imu = Imu()
+    imu.header.stamp = now.to_msg()
+    node.imu_callback(imu)
+
+    # Step 1: Low altitude (0.5m) -> 3 frames, no samples collected
+    rng = Range()
+    rng.header.stamp = now.to_msg()
+    rng.range = 0.5
+    node.range_callback(rng)
+
+    synthetic_frames = []
+    variances = []
+    np.random.seed(42)
+    for i in range(5):
+        grid = np.random.randint(0, 40 * (i + 1), (240, 320), dtype=np.uint8)
+        bgr = cv2.cvtColor(grid, cv2.COLOR_GRAY2BGR)
+        synthetic_frames.append(bgr)
+        variances.append(ImageQualityEvaluator.compute_variance(grid))
+
+    expected_median = float(np.median(variances))
+
+    for i in range(3):
+        t = now + rclpy.time.Duration(seconds=i * 0.05)
+        rng.header.stamp = t.to_msg()
+        node.range_callback(rng)
+        img_msg = bridge.cv2_to_imgmsg(synthetic_frames[i % len(synthetic_frames)], encoding="bgr8")
+        img_msg.header.stamp = t.to_msg()
+        node.image_callback(img_msg)
+        rclpy.spin_once(node, timeout_sec=0.01)
+
+    assert len(node.baseline_samples) == 0
+    assert not node.baseline_calibrated
+
+    # Step 2: Drone climbs airborne (1.5m >= 1.0m) -> feed 5 frames to calibrate
+    rng.range = 1.5
+    for i in range(5):
+        t = now + rclpy.time.Duration(seconds=(i + 3) * 0.05)
+        rng.header.stamp = t.to_msg()
+        node.range_callback(rng)
+        img_msg = bridge.cv2_to_imgmsg(synthetic_frames[i], encoding="bgr8")
+        img_msg.header.stamp = t.to_msg()
+        node.image_callback(img_msg)
+        rclpy.spin_once(node, timeout_sec=0.01)
+
+    assert node.baseline_calibrated is True
+    assert math.isclose(node.laplacian_baseline, expected_median, rel_tol=1e-5)
+    assert math.isclose(node.quality_evaluator.baseline, expected_median, rel_tol=1e-5)
+
+    # Step 3: Normal evaluation resumes
+    # A flat uniform frame must evaluate as degraded
+    flat_frame = np.full((240, 320, 3), 128, dtype=np.uint8)
+    gray_flat = cv2.cvtColor(flat_frame, cv2.COLOR_BGR2GRAY)
+    eval_result = node.quality_evaluator.evaluate(gray_flat)
+    assert eval_result.is_degraded is True
+
+    node.destroy_node()
+
+
 def test_auto_laplacian_baseline_calibration(ros_context, tmp_path):
-    bridge = get_compatible_bridge()
+    bridge = CvBridge()
     node = PerceptionNode(
         node_name="test_auto_laplacian",
         parameter_overrides=[
             Parameter("laplacian_baseline", Parameter.Type.DOUBLE, 0.0),
             Parameter("laplacian_baseline_frames", Parameter.Type.INTEGER, 5),
+            Parameter("laplacian_calibration_min_altitude_m", Parameter.Type.DOUBLE, 1.0),
             Parameter("detection_dir", Parameter.Type.STRING, str(tmp_path)),
         ],
     )
@@ -416,7 +606,6 @@ def test_auto_laplacian_baseline_calibration(ros_context, tmp_path):
     variances = []
     np.random.seed(123)
     for i in range(5):
-        # Varying checkerboard / noise textures
         grid = np.random.randint(0, 50 * (i + 1), (240, 320), dtype=np.uint8)
         bgr = cv2.cvtColor(grid, cv2.COLOR_GRAY2BGR)
         synthetic_frames.append(bgr)
@@ -425,12 +614,12 @@ def test_auto_laplacian_baseline_calibration(ros_context, tmp_path):
     expected_median = float(np.median(variances))
     assert expected_median > 0.0
 
-    # Feed frames 0..3: calibration should still be in progress
+    # Feed frames 0..3 at airborne altitude 1.5m: calibration should still be in progress
     for i in range(4):
         t = now + rclpy.time.Duration(seconds=i * 0.05)
         rng = Range()
         rng.header.stamp = t.to_msg()
-        rng.range = 2.0
+        rng.range = 1.5
         node.range_callback(rng)
 
         imu = Imu()
@@ -449,7 +638,7 @@ def test_auto_laplacian_baseline_calibration(ros_context, tmp_path):
     t4 = now + rclpy.time.Duration(seconds=4 * 0.05)
     rng = Range()
     rng.header.stamp = t4.to_msg()
-    rng.range = 2.0
+    rng.range = 1.5
     node.range_callback(rng)
 
     imu = Imu()
@@ -482,7 +671,7 @@ def test_auto_laplacian_baseline_calibration(ros_context, tmp_path):
 
 
 def test_manual_laplacian_baseline_override(ros_context, tmp_path):
-    bridge = get_compatible_bridge()
+    bridge = CvBridge()
     node = PerceptionNode(
         node_name="test_manual_laplacian",
         parameter_overrides=[
@@ -521,6 +710,7 @@ def test_covariance_parameters_and_defaults(ros_context):
     assert node_def.nominal_covariance == 0.05
     assert node_def.degraded_covariance == 1.0e6
     assert node_def.ramp_frames == 5
+    assert node_def.laplacian_calibration_min_altitude_m == 1.0
 
     assert node_def.covariance_ramp.nominal_covariance == 0.05
     assert node_def.covariance_ramp.degraded_covariance == 1.0e6
@@ -534,11 +724,13 @@ def test_covariance_parameters_and_defaults(ros_context):
             Parameter("nominal_covariance", Parameter.Type.DOUBLE, 0.10),
             Parameter("degraded_covariance", Parameter.Type.DOUBLE, 5.0e5),
             Parameter("ramp_frames", Parameter.Type.INTEGER, 8),
+            Parameter("laplacian_calibration_min_altitude_m", Parameter.Type.DOUBLE, 1.5),
         ],
     )
     assert node_custom.nominal_covariance == 0.10
     assert node_custom.degraded_covariance == 5.0e5
     assert node_custom.ramp_frames == 8
+    assert node_custom.laplacian_calibration_min_altitude_m == 1.5
 
     assert node_custom.covariance_ramp.nominal_covariance == 0.10
     assert node_custom.covariance_ramp.degraded_covariance == 5.0e5
