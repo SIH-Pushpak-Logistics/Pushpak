@@ -25,9 +25,10 @@ class GatewayEndToEndTest(unittest.IsolatedAsyncioTestCase):
         endpoint = f'tcp/127.0.0.1:{free_port()}'
         port = free_port()
         gateway = subprocess.Popen([sys.executable, str(root / 'tools/zenoh_gateway.py'),
-                                    '--drone-id', '1', '--listen', endpoint, '--port', str(port)],
+                                    '--listen', endpoint, '--port', str(port)],
                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
         publisher = None
+        rig = None
         try:
             for _ in range(100):
                 try:
@@ -44,6 +45,9 @@ class GatewayEndToEndTest(unittest.IsolatedAsyncioTestCase):
                 publisher = subprocess.Popen([str(binary), '--drone-id', '1', '--connect', endpoint],
                                              stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                                              stderr=subprocess.DEVNULL, text=True)
+                rig = subprocess.Popen([str(binary), '--drone-id', '2', '--connect', endpoint],
+                                       stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL, text=True)
                 messages = [
                     dict(kind='heartbeat', timestamp_ms=12345, status_flags=0),
                     dict(kind='keyframe', timestamp_ms=12345, pos_x_mm=1250, pos_y_mm=-500,
@@ -55,8 +59,18 @@ class GatewayEndToEndTest(unittest.IsolatedAsyncioTestCase):
                     for message in messages:
                         publisher.stdin.write(json.dumps(message) + '\n')
                     publisher.stdin.flush()
-                    data = json.loads(await asyncio.wait_for(ws.recv(), 2))['data']
-                    if data['pose'] and data['victims'] and data['linkStatus']['state'] == 'ONLINE':
+                    for message in messages:
+                        rig_message = dict(message)
+                        if rig_message['kind'] == 'keyframe':
+                            rig_message['pos_x_mm'] = -2500
+                        rig.stdin.write(json.dumps(rig_message) + '\n')
+                    rig.stdin.flush()
+                    fleet = json.loads(await asyncio.wait_for(ws.recv(), 2))['data']
+                    data = fleet['1']
+                    rig_data = fleet['2']
+                    if (data['pose'] and data['victims'] and data['linkStatus']['state'] == 'ONLINE'
+                            and rig_data['pose'] and rig_data['victims']
+                            and rig_data['linkStatus']['state'] == 'ONLINE'):
                         break
                 else:
                     self.fail('Rust telemetry did not reach WebSocket')
@@ -64,16 +78,42 @@ class GatewayEndToEndTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(data['pose']['yaw_deg'], 90)
                 self.assertEqual(data['victims'][0]['victim_id'], '1:7')
                 self.assertEqual(data['victims'][0]['confidence'], .87)
+                self.assertEqual(rig_data['pose']['x'], -2.5)
+                self.assertEqual(rig_data['victims'][0]['victim_id'], '2:7')
                 publisher.terminate()
                 publisher.wait(timeout=5)
+                publisher.stdin.close()
                 for _ in range(30):
-                    data = json.loads(await asyncio.wait_for(ws.recv(), 2))['data']
+                    rig.stdin.write(json.dumps(dict(kind='heartbeat', timestamp_ms=12345,
+                                                   status_flags=0)) + '\n')
+                    rig.stdin.flush()
+                    fleet = json.loads(await asyncio.wait_for(ws.recv(), 2))['data']
+                    data = fleet['1']
+                    rig_data = fleet['2']
                     if data['linkStatus']['state'] == 'OFFLINE':
                         break
                 self.assertEqual(data['linkStatus']['state'], 'OFFLINE')
                 self.assertIsNone(data['pose'])
+                self.assertEqual(rig_data['linkStatus']['state'], 'ONLINE')
+                publisher = subprocess.Popen([str(binary), '--drone-id', '1', '--connect', endpoint],
+                                             stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                             stderr=subprocess.DEVNULL, text=True)
+                for _ in range(50):
+                    for message in messages:
+                        publisher.stdin.write(json.dumps(message) + '\n')
+                    publisher.stdin.flush()
+                    rig.stdin.write(json.dumps(dict(kind='heartbeat', timestamp_ms=12345,
+                                                   status_flags=0)) + '\n')
+                    rig.stdin.flush()
+                    fleet = json.loads(await asyncio.wait_for(ws.recv(), 2))['data']
+                    data = fleet['1']
+                    if data['linkStatus']['state'] == 'ONLINE' and data['pose']:
+                        break
+                self.assertEqual(data['linkStatus']['state'], 'ONLINE')
+                self.assertEqual(data['pose']['x'], 1.25)
+                self.assertEqual(fleet['2']['linkStatus']['state'], 'ONLINE')
         finally:
-            for process in (publisher, gateway):
+            for process in (publisher, rig, gateway):
                 if process is not None:
                     if process.poll() is None:
                         process.terminate()

@@ -28,8 +28,9 @@ Windows host; no Docker executable was available.
 | FS-4 finished after sending LAND even if FCU did not accept it | LANDING state retries until observed LAND or disarmed |
 
 The gateway is a ground peer, not a router. Scout and rig must have a direct link.
-The gateway displays one explicitly selected vehicle to avoid merging unrelated
-odom origins. It does not synthesize unsupported sensor fields or flight state.
+The gateway tracks scout 1 and rig 2 separately. The dashboard shows both link
+states and lets the operator select a vehicle without merging their odom origins.
+It does not synthesize unsupported sensor fields or flight state.
 
 ## Verified locally
 
@@ -40,13 +41,18 @@ odom origins. It does not synthesize unsupported sensor fields or flight state.
   stale/future odometry, wrong frames, units and timestamps.
 - Existing fake-ROS three-peer rehearsal: **passed** with real Rust/Zenoh processes.
 - Perception mathematical core: **24 tests passed** against current PR27 code.
-- Gateway state/validation: **2 tests passed**.
-- Actual Rust scout 1 → Zenoh → gateway → WebSocket: **1 test passed**, checking
-  position/yaw/confidence units, survivor ID, pose expiry and heartbeat loss.
+- Gateway state/validation: **3 tests passed**.
+- Actual Rust scout 1 and rig 2 → Zenoh → gateway → WebSocket: **1 test passed**,
+  checking separate positions and survivor IDs, scout loss while rig remains
+  online, scout recovery, pose expiry and unit conversion.
+- Live browser on local loopback: both vehicle positions and link states rendered;
+  scout loss cleared only scout pose; recovery restored it; a Rust-published
+  rig survivor event appeared with ID `2:42` and 93% confidence.
 - Handshake state regressions with ROS imports stubbed: **2 tests passed**.
 - Dashboard TypeScript/production build and oxlint: **passed**.
 - Python compile checks and Git whitespace check: **passed**.
 
+The browser check used three local processes, not three physical machines.
 The fake ROS tests do not establish DDS QoS compatibility or ROS launch success.
 Perception ROS integration tests still require Humble plus built interfaces.
 The handshake tests do not verify FCU acceptance or physical LAND behaviour.
@@ -74,7 +80,7 @@ On the ground machine (see dashboard README for browser setup):
 
 ```sh
 python -m pip install -r tools/requirements-gateway.txt
-python tools/zenoh_gateway.py --drone-id 1 --connect tcp/SCOUT_IP:7447
+python tools/zenoh_gateway.py --connect tcp/SCOUT_IP:7447 --connect tcp/RIG_IP:7447
 ```
 
 For rig 2 use the adapter's existing launch with `drone_id:=2`, an explicit
@@ -93,6 +99,9 @@ and an odometry producer are still required for real rig detection coordinates.
    origin. Retrying LAND does not fix that underlying firmware/origin issue.
 3. **Physical evidence:** actual three-machine scout/rig/ground acceptance, real
    camera inference, ROS timing/QoS and hardware I/O remain to be performed.
+   Run `tools/capture_three_peer_evidence.sh` on the Ubuntu/Mac hosts to capture
+   both ping directions and raw Ubuntu `pgrep` output; the old supplied logs
+   contain neither. A local loopback run is not physical acceptance evidence.
 4. **Tabletop IoT:** gas/ultrasonic/environment/PIR sensors have no drivers or
    agreed dashboard transport yet. The frozen drone protobuf has no such fields.
 5. **Estimation limits:** current perception projection uses a level/downward-camera

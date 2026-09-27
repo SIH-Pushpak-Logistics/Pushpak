@@ -1,94 +1,77 @@
-import { useState, useEffect, useRef } from 'react';
-import { type DashboardState, type DronePose, type DroneAltitude, type DroneVelocity, type DroneFlowDebug, type LinkStatus, type Victim } from '../types';
+import { useEffect, useState } from 'react';
+import type { DashboardState, DronePose } from '../types';
 
-export function useTelemetry(wsUrl: string) {
-    const [state, setState] = useState<DashboardState>({
-        pose: null,
-        altitude: null,
-        velocity: null,
-        flowDebug: null,
-        linkStatus: null,
-        victims: [],
-        track: [],
-        connected: false
-    });
+type VehicleSnapshot = Omit<DashboardState, 'track' | 'connected'>;
+type Fleet = Record<string, DashboardState>;
 
-    const wsRef = useRef<WebSocket | null>(null);
+const emptyVehicle = (droneId: string, connected: boolean): DashboardState => ({
+    pose: null, altitude: null, velocity: null, flowDebug: null, victims: [], track: [],
+    linkStatus: {
+        timestamp: 0, drone_id: droneId, state: 'OFFLINE', cached_packets: null,
+        last_sync_sec: null, rssi_dbm: null,
+    }, connected,
+});
+
+export function useTelemetry(wsUrl: string, selectedId: string) {
+    const [fleet, setFleet] = useState<Fleet>({});
+    const [connected, setConnected] = useState(false);
 
     useEffect(() => {
-        let reconnectTimer: number;
         let disposed = false;
+        let reconnectTimer: number | undefined;
+        let socket: WebSocket | undefined;
 
         function connect() {
             if (disposed) return;
-            const ws = new WebSocket(wsUrl);
-            wsRef.current = ws;
-
-            ws.onopen = () => {
-                if (disposed) return;
-                setState(s => ({ ...s, connected: true }));
-            };
-
-            ws.onmessage = (event) => {
+            socket = new WebSocket(wsUrl);
+            socket.onopen = () => { if (!disposed) setConnected(true); };
+            socket.onmessage = (event) => {
                 if (disposed) return;
                 try {
                     const message = JSON.parse(event.data);
-                    const { type, data } = message;
-
-                    setState(prev => {
-                        const newState = { ...prev };
-                        if (type === 'snapshot') {
-                            const sameDrone = prev.linkStatus?.drone_id === data.linkStatus?.drone_id;
-                            const track = sameDrone ? prev.track : [];
-                            const changed = data.pose && (prev.pose?.timestamp !== data.pose.timestamp || !sameDrone);
-                            return { ...prev, ...data, connected: true,
-                                track: changed ? [...track, data.pose].slice(-500) : track };
-                        } else if (type === 'pose') {
-                            newState.pose = data as DronePose;
-                            // Add to track (max 500 points)
-                            const track = [...prev.track, newState.pose];
-                            if (track.length > 500) track.shift();
-                            newState.track = track;
-                        } else if (type === 'altitude') {
-                            newState.altitude = data as DroneAltitude;
-                        } else if (type === 'velocity') {
-                            newState.velocity = data as DroneVelocity;
-                        } else if (type === 'flow_debug') {
-                            newState.flowDebug = data as DroneFlowDebug;
-                        } else if (type === 'status') {
-                            newState.linkStatus = data as LinkStatus;
-                        } else if (type === 'victims') {
-                            newState.victims = data as Victim[];
+                    if (message.type !== 'fleet_snapshot' || typeof message.data !== 'object') return;
+                    const snapshots = message.data as Record<string, VehicleSnapshot>;
+                    setFleet(previous => {
+                        const next: Fleet = {};
+                        for (const [droneId, data] of Object.entries(snapshots)) {
+                            if (!data.linkStatus || data.linkStatus.drone_id !== droneId) continue;
+                            const before = previous[droneId];
+                            const track = before?.track ?? [];
+                            const pose = data.pose as DronePose | null;
+                            const changed = pose && before?.pose?.timestamp !== pose.timestamp;
+                            next[droneId] = {
+                                ...data, connected: true,
+                                track: changed ? [...track, pose].slice(-500) : track,
+                            };
                         }
-                        return newState;
+                        return next;
                     });
-                } catch (e) {
-                    console.error('Failed to parse WebSocket message', e);
+                } catch (error) {
+                    console.error('Invalid telemetry snapshot', error);
                 }
             };
-
-            ws.onclose = () => {
+            socket.onclose = () => {
                 if (disposed) return;
-                setState(s => ({ ...s, connected: false, pose: null, linkStatus: null }));
-                reconnectTimer = setTimeout(connect, 2000);
+                setConnected(false);
+                setFleet(previous => Object.fromEntries(Object.entries(previous).map(([id, value]) =>
+                    [id, { ...value, pose: null, connected: false,
+                           linkStatus: { ...value.linkStatus!, state: 'OFFLINE' as const } }])));
+                reconnectTimer = window.setTimeout(connect, 2000);
             };
-
-            ws.onerror = (err) => {
-                console.error('WebSocket Error', err);
-                ws.close();
-            };
+            socket.onerror = () => socket?.close();
         }
 
         connect();
-
         return () => {
             disposed = true;
-            clearTimeout(reconnectTimer);
-            if (wsRef.current) {
-                wsRef.current.close();
-            }
+            window.clearTimeout(reconnectTimer);
+            socket?.close();
         };
     }, [wsUrl]);
 
-    return state;
+    return {
+        state: fleet[selectedId] ?? emptyVehicle(selectedId, connected),
+        fleet,
+        connected,
+    };
 }

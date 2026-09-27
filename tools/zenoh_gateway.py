@@ -86,8 +86,27 @@ class GatewayState:
             }}
 
 
+class FleetState:
+    """Keep scout and rig telemetry separate; their odom origins may differ."""
+    def __init__(self, drone_ids, clock=time.monotonic):
+        self.drones = {drone_id: GatewayState(drone_id, clock) for drone_id in drone_ids}
+
+    def receive(self, key, payload):
+        decoded = decode(key, payload)
+        if decoded is not None:
+            state = self.drones.get(decoded[1].drone_id)
+            if state is not None:
+                state.receive(key, payload)
+
+    def snapshot(self):
+        return {'type': 'fleet_snapshot', 'data': {
+            str(drone_id): state.snapshot()['data']
+            for drone_id, state in self.drones.items()
+        }}
+
+
 async def run(args):
-    state = GatewayState(args.drone_id)
+    state = FleetState(args.drone_id or [1, 2])
     config = zenoh.Config()
     config.insert_json5('mode', '"peer"')
     for name in ('connect', 'listen'):
@@ -108,7 +127,8 @@ async def run(args):
 
     try:
         async with websockets.serve(handler, args.host, args.port):
-            print(f'Zenoh ground peer 0 -> ws://{args.host}:{args.port}; displaying drone {args.drone_id}', flush=True)
+            print(f'Zenoh ground peer 0 -> ws://{args.host}:{args.port}; '
+                  f'displaying drones {list(state.drones)}', flush=True)
             heartbeat = MESSAGES['swarm.telemetry.Heartbeat'](drone_id=0)
             while True:
                 heartbeat.timestamp_ms = int(time.monotonic() * 1000) & 0xffffffff
@@ -121,7 +141,8 @@ async def run(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--drone-id', type=int, choices=range(1, 256), default=1)
+    parser.add_argument('--drone-id', type=int, choices=range(1, 256),
+                        action='append', help='Vehicle to display (repeatable; default: 1 and 2)')
     parser.add_argument('--connect', action='append', default=[])
     parser.add_argument('--listen', action='append', default=[])
     parser.add_argument('--host', default='127.0.0.1')

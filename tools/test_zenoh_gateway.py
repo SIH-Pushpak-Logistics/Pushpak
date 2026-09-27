@@ -1,5 +1,5 @@
 import unittest
-from zenoh_gateway import GatewayState, MESSAGES, decode
+from zenoh_gateway import FleetState, GatewayState, MESSAGES, decode
 
 
 class GatewayTest(unittest.TestCase):
@@ -31,3 +31,23 @@ class GatewayTest(unittest.TestCase):
         self.assertIsNone(state.snapshot()['data']['pose'])
         now[0] += 1
         self.assertEqual(state.snapshot()['data']['linkStatus']['state'], 'OFFLINE')
+
+    def test_fleet_keeps_vehicle_origins_and_loss_separate(self):
+        now = [10.]
+        fleet = FleetState([1, 2], lambda: now[0])
+        for drone_id, x in ((1, 1000), (2, -2000)):
+            for kind, name, fields in (
+                ('heartbeat', 'Heartbeat', {}),
+                ('keyframe', 'SubMapKeyframe', {'pos_x_mm': x}),
+            ):
+                payload = MESSAGES['swarm.telemetry.' + name](drone_id=drone_id, **fields).SerializeToString()
+                fleet.receive(f'pushpak/{kind}/{drone_id}', payload)
+        drones = fleet.snapshot()['data']
+        self.assertEqual(drones['1']['pose']['x'], 1)
+        self.assertEqual(drones['2']['pose']['x'], -2)
+        now[0] += 2
+        packet = MESSAGES['swarm.telemetry.Heartbeat'](drone_id=2).SerializeToString()
+        fleet.receive('pushpak/heartbeat/2', packet)
+        drones = fleet.snapshot()['data']
+        self.assertEqual(drones['1']['linkStatus']['state'], 'OFFLINE')
+        self.assertEqual(drones['2']['linkStatus']['state'], 'ONLINE')
