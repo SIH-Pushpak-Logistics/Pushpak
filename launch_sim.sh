@@ -42,7 +42,8 @@ if ! ros2 pkg prefix drone_description >/dev/null 2>&1; then
 fi
 
 cleanup() {
-    for p in arducopter "gz sim" parameter_bridge mavros_node robot_state_publisher; do
+    for p in arducopter "gz sim" parameter_bridge mavros_node robot_state_publisher \
+             sitl_bringup.launch.py robot_localization/ekf_node /workspace/install/; do
         pkill -9 -f "$p" 2>/dev/null
     done
     local n=0
