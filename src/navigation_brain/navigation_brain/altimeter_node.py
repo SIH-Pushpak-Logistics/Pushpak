@@ -18,12 +18,25 @@ class AltimeterNode(Node):
     def __init__(self):
         super().__init__('altimeter_node')
 
-        self.sub_scan = self.create_subscription(
-            LaserScan,
-            '/drone/rangefinder/scan',
-            self.scan_callback,
-            qos_profile_sensor_data
-        )
+        self.declare_parameter('input_mode', 'scan')
+        input_mode = self.get_parameter('input_mode').value
+        if input_mode not in ('scan', 'range'):
+            raise ValueError("input_mode must be 'scan' or 'range'")
+
+        if input_mode == 'scan':
+            self.input_subscription = self.create_subscription(
+                LaserScan,
+                '/drone/rangefinder/scan',
+                self.scan_callback,
+                qos_profile_sensor_data
+            )
+        else:
+            self.input_subscription = self.create_subscription(
+                Range,
+                '/drone/rangefinder/raw',
+                self.range_callback,
+                qos_profile_sensor_data
+            )
 
         self.pub_range = self.create_publisher(
             Range,
@@ -38,7 +51,7 @@ class AltimeterNode(Node):
         )
 
         self.get_logger().info(
-            'v2 AltimeterNode active: /drone/rangefinder/scan -> '
+            f'v2 AltimeterNode active ({input_mode} input) -> '
             '/drone/tof_range (Range) & /ekf/altitude_pose (PoseWithCovarianceStamped)'
         )
 
@@ -46,23 +59,36 @@ class AltimeterNode(Node):
         if not msg.ranges:
             return
 
-        raw_z = msg.ranges[0]
-        stamp = msg.header.stamp
+        self.publish_measurement(
+            msg.ranges[0], msg.header.stamp, msg.range_min, msg.range_max,
+            frame_id='tof_link', field_of_view=0.471,
+            radiation_type=Range.INFRARED)
+
+    def range_callback(self, msg: Range):
+        self.publish_measurement(
+            msg.range, msg.header.stamp, msg.min_range, msg.max_range,
+            frame_id=msg.header.frame_id or 'tof_link',
+            field_of_view=msg.field_of_view,
+            radiation_type=msg.radiation_type)
+
+    def publish_measurement(self, raw_z, stamp, range_min, range_max,
+                            frame_id, field_of_view, radiation_type):
 
         # Determine validity per REP-117 & sensor bounds (4.0m max per README §11)
         is_nan = math.isnan(raw_z)
-        is_underflow = (not is_nan) and (raw_z < msg.range_min)
-        is_overflow = (not is_nan) and (raw_z > min(msg.range_max, MAX_TOF_RANGE_M))
+        effective_max = min(float(range_max), MAX_TOF_RANGE_M)
+        is_underflow = (not is_nan) and (raw_z < range_min)
+        is_overflow = (not is_nan) and (raw_z > effective_max)
         is_valid = not (is_nan or is_underflow or is_overflow or raw_z <= 0.0)
 
         # 1. Publish sensor_msgs/msg/Range (REP-117 compliant)
         range_msg = Range()
         range_msg.header.stamp = stamp
-        range_msg.header.frame_id = 'tof_link'
-        range_msg.radiation_type = Range.INFRARED
-        range_msg.field_of_view = 0.471  # ~27 deg FoV for VL53L1X
-        range_msg.min_range = float(msg.range_min)
-        range_msg.max_range = float(MAX_TOF_RANGE_M)
+        range_msg.header.frame_id = frame_id
+        range_msg.radiation_type = radiation_type
+        range_msg.field_of_view = float(field_of_view)
+        range_msg.min_range = float(range_min)
+        range_msg.max_range = effective_max
 
         if is_nan:
             range_msg.range = float('nan')
