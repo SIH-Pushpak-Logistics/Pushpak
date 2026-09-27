@@ -31,7 +31,7 @@ class FakeNode:
     def __init__(self, name):
         self.parameters = {}
 
-    def declare_parameter(self, name, default):
+    def declare_parameter(self, name, default=None):
         self.parameters[name] = self.overrides.get(name, default)
 
     def get_parameter(self, name):
@@ -48,7 +48,9 @@ class FakeNode:
         return SimpleNamespace(now=lambda: SimpleNamespace(nanoseconds=now_ns))
 
     def get_logger(self):
-        return SimpleNamespace(info=lambda message: None, warning=lambda message: print(message))
+        return SimpleNamespace(info=lambda message: None,
+                               warning=lambda message: print(message),
+                               error=lambda message: print(message))
 
     def destroy_node(self):
         return None
@@ -135,6 +137,7 @@ def main():
         FakeNode.overrides = {
             'rust_binary': str(RIG_BINARY),
             'connect_endpoints': [endpoint],
+            'pose_source': 'mock',
         }
         FakeNode.clock_ns = 5_555_000_000  # Simulated ROS /clock, not process uptime.
         adapter = RosZenohAdapter()

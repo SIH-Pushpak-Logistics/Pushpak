@@ -4,8 +4,10 @@
 import json
 import math
 from pathlib import Path
+import queue
 import subprocess
 import sys
+import threading
 
 import rclpy
 from rclpy.node import Node
@@ -22,7 +24,7 @@ class RosZenohAdapter(Node):
     def __init__(self):
         super().__init__('hitl_zenoh_publisher')
         self.declare_parameter('drone_id', 2)
-        self.declare_parameter('pose_source', 'mock')
+        self.declare_parameter('pose_source')
         self.declare_parameter('mock_x_m', 0.0)
         self.declare_parameter('mock_y_m', 0.0)
         self.declare_parameter('mock_z_m', 1.0)
@@ -36,7 +38,7 @@ class RosZenohAdapter(Node):
             raise ValueError('the HITL rig must use drone_id=2')
         self.pose_source = self.get_parameter('pose_source').value
         if self.pose_source not in ('mock', 'odometry'):
-            raise ValueError('pose_source must be mock or odometry')
+            raise ValueError('pose_source is required: choose mock or odometry')
         self.mock = tuple(self.get_parameter(name).value for name in (
             'mock_x_m', 'mock_y_m', 'mock_z_m', 'mock_yaw_deg'))
         if not all(map(math.isfinite, self.mock)):
@@ -55,6 +57,12 @@ class RosZenohAdapter(Node):
                 command.extend(['--listen', endpoint])
         self.peer = subprocess.Popen(command, stdin=subprocess.PIPE, text=True,
                                      bufsize=1)
+        self.outbox = queue.Queue(maxsize=128)
+        self.writer_stop = threading.Event()
+        self.writer_failed = threading.Event()
+        self.dropped_messages = 0
+        self.writer = threading.Thread(target=self._write_messages, daemon=True)
+        self.writer.start()
         self.latest_odom = None
         self.tracker = SurvivorTracker()
         self.status_flags = 0
@@ -65,6 +73,10 @@ class RosZenohAdapter(Node):
                                      self.on_odometry, 10)
         self.create_timer(0.5, self.send_heartbeat)
         self.create_timer(0.2, self.send_keyframe)
+        self.create_timer(0.2, self.check_writer)
+        if self.pose_source == 'mock':
+            self.create_timer(5.0, self.warn_mock)
+            self.warn_mock()
         self.get_logger().info(f'HITL Zenoh adapter running: pose_source={self.pose_source}')
 
     def clock_timestamp_ms(self):
@@ -72,13 +84,44 @@ class RosZenohAdapter(Node):
         return (self.get_clock().now().nanoseconds // 1_000_000) & 0xffffffff
 
     def send(self, message):
-        if self.peer.poll() is not None:
-            raise RuntimeError(f'Rust Zenoh peer exited with code {self.peer.returncode}')
+        self.check_writer()
         try:
-            self.peer.stdin.write(json.dumps(message, separators=(',', ':')) + '\n')
-            self.peer.stdin.flush()
-        except BrokenPipeError as exc:
-            raise RuntimeError('Rust Zenoh peer closed its input') from exc
+            self.outbox.put_nowait(json.dumps(message, separators=(',', ':')) + '\n')
+        except queue.Full:
+            self.dropped_messages += 1
+            if self.dropped_messages == 1 or self.dropped_messages % 100 == 0:
+                self.get_logger().warning(
+                    f'Rust Zenoh pipe backlog full; dropped {self.dropped_messages} messages')
+
+    def _write_messages(self):
+        while not self.writer_stop.is_set():
+            if self.peer.poll() is not None:
+                self._writer_failure(f'exited with code {self.peer.returncode}')
+                return
+            try:
+                line = self.outbox.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            try:
+                self.peer.stdin.write(line)
+                self.peer.stdin.flush()
+            except (BrokenPipeError, OSError, ValueError):
+                self._writer_failure('closed its input')
+                return
+
+    def _writer_failure(self, message):
+        if not self.writer_stop.is_set() and not self.writer_failed.is_set():
+            self.get_logger().error(f'Rust Zenoh peer stopped: {message}')
+            self.writer_failed.set()
+
+    def check_writer(self):
+        if self.writer_failed.is_set():
+            raise RuntimeError('Rust Zenoh peer stopped; terminating adapter')
+
+    def warn_mock(self):
+        self.get_logger().warning(
+            'MOCK POSE ACTIVE: publishing invented position as telemetry; '
+            'use pose_source:=odometry for real flight')
 
     def send_heartbeat(self):
         self.send({'kind': 'heartbeat', 'timestamp_ms': self.clock_timestamp_ms(),
@@ -132,13 +175,19 @@ class RosZenohAdapter(Node):
                    'hit_count': hit_count})
 
     def destroy_node(self):
+        self.writer_stop.set()
         if self.peer.poll() is None:
+            self.peer.terminate()
+        try:
+            self.peer.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            self.peer.kill()
+            self.peer.wait(timeout=3)
+        self.writer.join(timeout=3)
+        try:
             self.peer.stdin.close()
-            try:
-                self.peer.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                self.peer.terminate()
-                self.peer.wait(timeout=3)
+        except (BrokenPipeError, OSError, ValueError):
+            pass  # A dead child may already have closed the pipe.
         return super().destroy_node()
 
 
@@ -150,11 +199,16 @@ def main():
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
+    except RuntimeError as exc:
+        if node is not None and not node.writer_failed.is_set():
+            node.get_logger().error(str(exc))
+        return 1
     finally:
         if node is not None:
             node.destroy_node()
         rclpy.shutdown()
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

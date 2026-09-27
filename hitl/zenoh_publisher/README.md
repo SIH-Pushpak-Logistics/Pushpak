@@ -18,7 +18,7 @@ builds `drone_interfaces`:
 ```bash
 cargo test --locked --manifest-path hitl/zenoh_publisher/Cargo.toml
 cargo build --release --locked --manifest-path hitl/zenoh_publisher/Cargo.toml
-python3 -m unittest discover -s hitl/zenoh_publisher -p 'test_conversion.py'
+python3 -m unittest discover -s hitl/zenoh_publisher -p 'test_*.py' -v
 ```
 
 Build natively on the Jetson. Python needs `rclpy`, `nav_msgs`, and the built
@@ -40,11 +40,13 @@ The script checks Heartbeat, Keyframe, and SurvivorEvent delivery, switches from
 mock to odometry pose, stops peer `0`, and checks that peers `1` and `2` keep
 communicating while `0` is reported lost within two seconds. It requires no ROS
 installation or Jetson and does not replace the physical three-machine test.
-The complete raw output from a local run is in [HITL_LOCAL_TESTS.log](HITL_LOCAL_TESTS.log).
+Raw local output belongs in the HITL pull request description.
 
 ## Tier 1: fixed mock pose
 
-The launch file exposes `pose_source` as a launch argument. From the repo
+The launch file requires an explicit `pose_source` argument. Mock mode publishes
+an invented position and emits a warning at startup and every five seconds.
+From the repo
 root, a direct launch is:
 
 ```bash
@@ -85,6 +87,11 @@ ros2 launch hitl/zenoh_publisher/launch/zenoh_publisher.launch.py \
 This subscribes to `/odometry/filtered`. Before the first odometry message,
 the adapter sends heartbeats but no keyframes. It never substitutes the mock
 pose in this mode.
+
+ROS callbacks place outbound JSON lines in a bounded queue. If Rust falls
+behind, the callback drops and counts messages rather than blocking the ROS
+executor. A writer thread owns stdin; if Rust exits or closes the pipe, the
+adapter logs the failure once and exits non-zero.
 
 ## Ground-station-loss test
 
