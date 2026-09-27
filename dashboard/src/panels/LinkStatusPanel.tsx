@@ -26,19 +26,19 @@ export const LinkStatusPanel: React.FC<Props> = ({ state }) => {
         <div className="metric-item">
           <div className="metric-label">RSSI</div>
           <div className="metric-value mono">
-            {linkStatus ? linkStatus.rssi_dbm.toFixed(1) : '--'} dBm
+            {linkStatus?.rssi_dbm != null ? linkStatus.rssi_dbm.toFixed(1) : '--'} dBm
           </div>
         </div>
         <div className="metric-item">
           <div className="metric-label">Cached Pkts</div>
           <div className="metric-value mono">
-            {linkStatus ? linkStatus.cached_packets : '--'}
+            {linkStatus?.cached_packets ?? '--'}
           </div>
         </div>
         <div className="metric-item" style={{ gridColumn: '1 / -1' }}>
           <div className="metric-label">Last Sync</div>
           <div className="metric-value mono" style={{ fontSize: '1rem' }}>
-            {linkStatus ? `${linkStatus.last_sync_sec.toFixed(2)}s` : '--'}
+            {linkStatus?.last_sync_sec != null ? `${linkStatus.last_sync_sec.toFixed(2)}s` : '--'}
           </div>
         </div>
       </div>

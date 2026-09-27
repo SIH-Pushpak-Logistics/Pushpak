@@ -17,23 +17,33 @@ export function useTelemetry(wsUrl: string) {
 
     useEffect(() => {
         let reconnectTimer: number;
+        let disposed = false;
 
         function connect() {
+            if (disposed) return;
             const ws = new WebSocket(wsUrl);
             wsRef.current = ws;
 
             ws.onopen = () => {
+                if (disposed) return;
                 setState(s => ({ ...s, connected: true }));
             };
 
             ws.onmessage = (event) => {
+                if (disposed) return;
                 try {
                     const message = JSON.parse(event.data);
                     const { type, data } = message;
 
                     setState(prev => {
                         const newState = { ...prev };
-                        if (type === 'pose') {
+                        if (type === 'snapshot') {
+                            const sameDrone = prev.linkStatus?.drone_id === data.linkStatus?.drone_id;
+                            const track = sameDrone ? prev.track : [];
+                            const changed = data.pose && (prev.pose?.timestamp !== data.pose.timestamp || !sameDrone);
+                            return { ...prev, ...data, connected: true,
+                                track: changed ? [...track, data.pose].slice(-500) : track };
+                        } else if (type === 'pose') {
                             newState.pose = data as DronePose;
                             // Add to track (max 500 points)
                             const track = [...prev.track, newState.pose];
@@ -58,7 +68,8 @@ export function useTelemetry(wsUrl: string) {
             };
 
             ws.onclose = () => {
-                setState(s => ({ ...s, connected: false }));
+                if (disposed) return;
+                setState(s => ({ ...s, connected: false, pose: null, linkStatus: null }));
                 reconnectTimer = setTimeout(connect, 2000);
             };
 
@@ -71,6 +82,7 @@ export function useTelemetry(wsUrl: string) {
         connect();
 
         return () => {
+            disposed = true;
             clearTimeout(reconnectTimer);
             if (wsRef.current) {
                 wsRef.current.close();

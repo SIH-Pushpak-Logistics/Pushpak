@@ -25,6 +25,7 @@ class RosZenohAdapter(Node):
         super().__init__('hitl_zenoh_publisher')
         self.declare_parameter('drone_id', 2)
         self.declare_parameter('pose_source')
+        self.declare_parameter('max_odom_age_s', 0.5)
         self.declare_parameter('mock_x_m', 0.0)
         self.declare_parameter('mock_y_m', 0.0)
         self.declare_parameter('mock_z_m', 1.0)
@@ -34,8 +35,11 @@ class RosZenohAdapter(Node):
         self.declare_parameter('listen_endpoints', [''])
 
         drone_id = self.get_parameter('drone_id').value
-        if drone_id != 2:
-            raise ValueError('the HITL rig must use drone_id=2')
+        if drone_id not in (1, 2):
+            raise ValueError('ROS telemetry requires scout drone_id=1 or rig drone_id=2')
+        self.max_odom_age_s = self.get_parameter('max_odom_age_s').value
+        if not math.isfinite(self.max_odom_age_s) or self.max_odom_age_s <= 0:
+            raise ValueError('max_odom_age_s must be finite and positive')
         self.pose_source = self.get_parameter('pose_source').value
         if self.pose_source not in ('mock', 'odometry'):
             raise ValueError('pose_source is required: choose mock or odometry')
@@ -48,7 +52,7 @@ class RosZenohAdapter(Node):
         if not binary:
             binary = str(Path(__file__).resolve().parent / 'target' / 'release' /
                          'pushpak_hitl_zenoh_publisher')
-        command = [binary, '--drone-id', '2']
+        command = [binary, '--drone-id', str(drone_id)]
         for endpoint in self.get_parameter('connect_endpoints').value:
             if endpoint:
                 command.extend(['--connect', endpoint])
@@ -134,6 +138,11 @@ class RosZenohAdapter(Node):
         if self.pose_source == 'odometry':
             if self.latest_odom is None:
                 return  # Do not present a mock pose as real odometry.
+            header = self.latest_odom.header
+            stamp_ns = header.stamp.sec * 1_000_000_000 + header.stamp.nanosec
+            age = (self.get_clock().now().nanoseconds - stamp_ns) * 1e-9
+            if header.frame_id != 'odom' or not 0 <= age <= self.max_odom_age_s:
+                return  # Frozen wire format has no frame or freshness metadata.
             timestamp_ms = timestamp_ms_from_stamp(self.latest_odom.header.stamp)
             pose = self.latest_odom.pose.pose
             xyz = (pose.position.x, pose.position.y, pose.position.z)
@@ -158,6 +167,9 @@ class RosZenohAdapter(Node):
                    'status_flags': self.status_flags})
 
     def on_detection(self, message):
+        if message.header.frame_id != 'odom':
+            self.get_logger().warning('ignored survivor detection outside odom frame')
+            return
         position = message.world_position
         xyz = (position.x, position.y, position.z)
         try:

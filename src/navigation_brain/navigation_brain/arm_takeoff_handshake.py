@@ -93,7 +93,9 @@ class ArmTakeoffHandshake(Node):
         self.get_logger().info(f'handshake FCU: {msg.text}')
 
     def tof_cb(self, msg):
-        if not math.isfinite(msg.range):
+        if not math.isfinite(msg.range) or msg.range <= 0.0:
+            self.tof_latest = None
+            self.tof_hist.clear()
             return
         now = self.get_clock().now()
         self.tof_latest = msg.range
@@ -104,7 +106,7 @@ class ArmTakeoffHandshake(Node):
             self.tof_ground = self.tof_ground[-self.ground_samples:]
 
     def settled(self):
-        values = [r for _, r in self.tof_hist]
+        values = [r for t, r in self.tof_hist if 0.0 <= self.age(t) <= self.settle_window_s]
         return len(values) >= 10 and max(values) - min(values) < self.settle_band_m
 
     def goto(self, phase, why):
@@ -143,7 +145,7 @@ class ArmTakeoffHandshake(Node):
         if self.phase == 'WAIT_LINK':
             if (self.fcu is not None and self.fcu.connected
                     and self.extnav_time is not None and self.age(self.extnav_time) < self.extnav_timeout_s
-                    and len(self.tof_ground) >= self.ground_samples):
+                    and len(self.tof_ground) >= self.ground_samples and self.settled()):
                 self.tof_zero = statistics.median(self.tof_ground)
                 self.goto('ORIGIN', f'link up, ExtNav flowing, ToF on ground {self.tof_zero:.3f} m')
 
@@ -197,7 +199,13 @@ class ArmTakeoffHandshake(Node):
             if self.fcu.armed and self.fcu.mode == 'GUIDED' and silent > self.fs4_timeout_s:
                 self.get_logger().error(f'FS-4: no cmd_vel for {silent:.2f} s; commanding LAND')
                 self.request('mode', SetMode.Request(custom_mode='LAND'))
-                self.goto('DONE', 'FS-4 fired')
+                self.goto('LANDING', 'FS-4 fired; waiting for FCU acknowledgement')
+
+        elif self.phase == 'LANDING':
+            if not self.fcu.armed or self.fcu.mode == 'LAND':
+                self.goto('DONE', 'FCU acknowledged LAND or disarmed')
+            elif self.due('mode'):
+                self.request('mode', SetMode.Request(custom_mode='LAND'))
 
 
 def main(args=None):

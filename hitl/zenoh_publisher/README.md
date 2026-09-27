@@ -133,3 +133,17 @@ system test should replace it with the actual SITL telemetry producer.
 The dashboard marker-under-2-seconds acceptance needs a real detector and
 `zenoh_gateway.py`; the current `perception_node.py` in this checkout is a
 stub, so that end-to-end result cannot yet be claimed from this code alone.
+
+
+## Integration audit update
+
+The shared adapter now accepts `drone_id:=1` (SITL scout) or `drone_id:=2`
+(HITL rig, default). Both Python and Rust enforce those assignments. The frozen
+protobuf schema is unchanged. In odometry mode, keyframes require frame `odom`
+and a source stamp no more than `max_odom_age_s` old (default 0.5 s); future stamps
+are rejected. Survivor detections must also be in `odom` because the wire format
+cannot carry frame IDs. Heartbeats continue independently of odometry validity.
+
+See `docs/INTEGRATION_AUDIT.md` for the integrated source-workspace launch and
+`dashboard/README.md` for the ground peer gateway. Local test binary paths can be
+overridden with `PUSHPAK_RIG_BINARY` and `PUSHPAK_PEER_BINARY`.

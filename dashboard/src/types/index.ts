@@ -57,9 +57,9 @@ export interface LinkStatus {
     timestamp: number;
     drone_id: string;
     state: 'ONLINE' | 'DEGRADED' | 'OFFLINE';
-    cached_packets: number;
-    last_sync_sec: number;
-    rssi_dbm: number;
+    cached_packets: number | null;
+    last_sync_sec: number | null;
+    rssi_dbm: number | null;
 }
 
 export interface DashboardState {

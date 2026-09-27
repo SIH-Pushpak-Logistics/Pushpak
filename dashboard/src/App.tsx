@@ -4,7 +4,7 @@ import { MapPanel } from './panels/MapPanel';
 import { VictimsPanel } from './panels/VictimsPanel';
 import { LinkStatusPanel } from './panels/LinkStatusPanel';
 
-const WS_URL = 'ws://localhost:8765';
+const WS_URL = import.meta.env.VITE_WS_URL || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:8765`;
 
 export default function App() {
   const state = useTelemetry(WS_URL);
@@ -21,7 +21,7 @@ export default function App() {
             {state.connected ? 'DATA LINK CONNECTED' : 'DATA LINK OFFLINE'}
           </div>
           <div className="status-badge" style={{ background: 'transparent', border: 'none', padding: 0 }}>
-            DRONE-00
+            DRONE-{state.linkStatus?.drone_id ?? '--'}
           </div>
         </div>
       </header>

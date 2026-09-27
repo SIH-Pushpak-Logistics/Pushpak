@@ -112,15 +112,16 @@ async fn publish(telemetry: &Telemetry, input: Input) -> pushpak_telemetry::Resu
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
-    if args.drone_id != 2 {
-        return Err("HITL rig is assigned drone_id=2 by the frozen contract".into());
+    if ![1, 2].contains(&args.drone_id) {
+        return Err("ROS publisher requires scout drone_id=1 or rig drone_id=2".into());
     }
     let telemetry =
         Telemetry::open_peer_with_config(args.drone_id, &args.connect, &args.listen).await?;
+    let own_id = args.drone_id;
     telemetry
-        .subscribe_all(|message| {
+        .subscribe_all(move |message| {
             let id = message.drone_id();
-            if id != 2 {
+            if id != own_id {
                 match message {
                     TelemetryMessage::Heartbeat(_) => println!("HEARTBEAT peer={id}"),
                     TelemetryMessage::Keyframe(_) => println!("KEYFRAME peer={id}"),
@@ -129,7 +130,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
         })
         .await?;
-    println!("HITL Zenoh peer 2 ready (no zenohd)");
+    println!("HITL Zenoh peer {own_id} ready (no zenohd)");
 
     let mut lines = BufReader::new(io::stdin()).lines();
     let mut previous = Vec::new();

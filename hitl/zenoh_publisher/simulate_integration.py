@@ -19,8 +19,8 @@ from types import ModuleType, SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[2]
 SUFFIX = '.exe' if os.name == 'nt' else ''
-RIG_BINARY = ROOT / 'hitl/zenoh_publisher/target/debug' / ('pushpak_hitl_zenoh_publisher' + SUFFIX)
-PEER_BINARY = ROOT / 'src/pushpak_peer/target/debug' / ('pushpak_peer' + SUFFIX)
+RIG_BINARY = Path(os.environ.get('PUSHPAK_RIG_BINARY', ROOT / 'hitl/zenoh_publisher/target/debug' / ('pushpak_hitl_zenoh_publisher' + SUFFIX)))
+PEER_BINARY = Path(os.environ.get('PUSHPAK_PEER_BINARY', ROOT / 'src/pushpak_peer/target/debug' / ('pushpak_peer' + SUFFIX)))
 KEYFRAMES = ROOT / 'src/pushpak_peer/testdata/keyframes.csv'
 
 
@@ -177,7 +177,7 @@ def main():
         detection = SimpleNamespace(
             world_position=SimpleNamespace(x=1.2, y=-0.3, z=1.1),
             confidence=0.87,
-            header=SimpleNamespace(stamp=SimpleNamespace(sec=1, nanosec=0)),
+            header=SimpleNamespace(frame_id='odom', stamp=SimpleNamespace(sec=1, nanosec=0)),
         )
         with send_lock:
             adapter.on_detection(detection)
@@ -187,7 +187,7 @@ def main():
         print('PASS: fake ROS detection -> adapter -> Rust protobuf -> Zenoh -> peer')
 
         odometry = SimpleNamespace(
-            header=SimpleNamespace(stamp=SimpleNamespace(sec=12, nanosec=345_000_000)),
+            header=SimpleNamespace(frame_id='odom', stamp=SimpleNamespace(sec=12, nanosec=345_000_000)),
             pose=SimpleNamespace(pose=SimpleNamespace(
             position=SimpleNamespace(x=2.0, y=-0.5, z=1.5),
             orientation=SimpleNamespace(x=0.0, y=0.0,
@@ -195,6 +195,7 @@ def main():
                                         w=math.cos(math.pi / 4)),
         )))
         with send_lock:
+            FakeNode.clock_ns = 12_345_000_000
             adapter.pose_source = 'odometry'
             adapter.on_odometry(odometry)
         wait_for(output, 'KEYFRAME peer=2', timeout=2)  # Drain any earlier mock frame.

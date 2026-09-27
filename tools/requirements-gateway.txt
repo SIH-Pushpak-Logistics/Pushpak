@@ -1,0 +1,3 @@
+eclipse-zenoh==1.0.0
+protobuf==3.20.3
+websockets==12.0
