@@ -102,6 +102,30 @@ class TestImageQualityEvaluator:
         result = evaluator.evaluate(empty_img)
         assert result.is_degraded
 
+    def test_compute_variance_static_method(self):
+        # Textured image should have positive finite variance
+        img = np.zeros((100, 100), dtype=np.uint8)
+        img[::2, ::2] = 255
+        var = ImageQualityEvaluator.compute_variance(img)
+        assert var > 0.0 and math.isfinite(var)
+
+        # Uniform image has 0 variance
+        uniform_img = np.full((100, 100), 128, dtype=np.uint8)
+        assert ImageQualityEvaluator.compute_variance(uniform_img) == 0.0
+
+        # None or empty returns 0.0
+        assert ImageQualityEvaluator.compute_variance(None) == 0.0
+        assert ImageQualityEvaluator.compute_variance(np.array([], dtype=np.uint8)) == 0.0
+
+    def test_zero_baseline_evaluates_as_degraded(self):
+        evaluator = ImageQualityEvaluator(baseline=0.0)
+        img = np.zeros((100, 100), dtype=np.uint8)
+        img[::2, ::2] = 255
+        res = evaluator.evaluate(img)
+        assert res.is_degraded
+        assert res.ratio == 0.0
+        assert res.variance > 0.0
+
 
 class TestCovarianceRamp:
     """Tests for 5-frame logarithmic covariance ramping."""
