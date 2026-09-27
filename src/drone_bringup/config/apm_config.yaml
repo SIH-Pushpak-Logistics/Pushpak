@@ -2,6 +2,25 @@ mavros:
   ros__parameters:
     plugin_denylist:
       - distance_sensor
+      - fake_gps
+      - gps_input
+      - gps_rtk
+      - gps_status
+      - hil
+      - mocap_pose_estimate
+      - odometry
+      - landing_target
+      - sim_state
+      - setpoint_position
+      - setpoint_raw
+      - setpoint_accel
+      - setpoint_attitude
+      - setpoint_trajectory
+      - trajectory
+      - manual_control
+      - rc_io
+      - waypoint
+      - rallypoint
     system_id: 255
     component_id: 1
     target_system_id: 1

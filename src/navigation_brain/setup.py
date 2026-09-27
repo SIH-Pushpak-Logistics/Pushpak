@@ -27,6 +27,7 @@ setup(
             'perception_node = navigation_brain.perception_node:main',
             'sim_radar_emulator_node = navigation_brain.sim_radar_emulator_node:main',
             'vio_bridge_node = navigation_brain.vio_bridge_node:main',
+            'arm_takeoff_handshake = navigation_brain.arm_takeoff_handshake:main',
         ],
     },
 )

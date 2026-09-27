@@ -22,9 +22,9 @@ def generate_launch_description():
 
     # 1. Enforce the Global Time Domain & Sensor Resolution
     use_sim_time = LaunchConfiguration('use_sim_time', default='true')
-    camera_rate = LaunchConfiguration('camera_rate', default='15')
-    camera_width = LaunchConfiguration('camera_width', default='160')
-    camera_height = LaunchConfiguration('camera_height', default='120')
+    camera_rate = LaunchConfiguration('camera_rate', default='30')
+    camera_width = LaunchConfiguration('camera_width', default='320')
+    camera_height = LaunchConfiguration('camera_height', default='240')
 
     # 2. Boot the Transform Tree
     robot_state_publisher = Node(
@@ -48,7 +48,7 @@ def generate_launch_description():
 
     gz_sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([os.path.join(ros_gz_sim_dir, 'launch', 'gz_sim.launch.py')]),
-        launch_arguments={'gz_args': '-s -r -v 4 ' + world_file}.items()
+        launch_arguments={'gz_args': ['-s -r -v 4 --seed ', LaunchConfiguration('gz_seed'), ' ', world_file]}.items()
     )
 
     # 4. Inject the Physical Drone Model via Harmonic's Spawner
@@ -63,7 +63,7 @@ def generate_launch_description():
     # The -S flag runs SITL, -I0 is instance 0, and --model gazebo-iris connects to your plugin
     ardupilot_sitl = ExecuteProcess(
         cmd=['/firmware/ardupilot/build/sitl/bin/arducopter', 
-             '-S', '-I0', 
+             '-S', '-I0', '-w', 
              '--model', 'JSON:127.0.0.1', 
              '--defaults', ardupilot_param_file],
         output='screen'
@@ -85,17 +85,41 @@ def generate_launch_description():
     )
 
 
+    bridge_node = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        parameters=[{
+            'config_file': os.path.join(drone_bringup_dir, 'config', 'bridge.yaml'),
+            'expand_gz_topic_names': True
+        }],
+        output='screen'
+    )
+
+    sim_radar = Node(
+        package='navigation_brain',
+        executable='sim_radar_emulator_node',
+        name='sim_radar_emulator_node',
+        output='screen',
+        parameters=[{
+            'use_sim_time': ParameterValue(use_sim_time, value_type=bool),
+            'seed': ParameterValue(LaunchConfiguration('radar_seed'), value_type=int),
+            'bias_initial_x': ParameterValue(LaunchConfiguration('radar_bias_x'), value_type=float),
+        }]
+    )
+
     # 7. Boot the Logic Brains
     swarm_bringup = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([os.path.join(drone_bringup_dir, 'launch', 'swarm_bringup.launch.py')]),
-        launch_arguments={'use_sim_time': use_sim_time}.items()
+        launch_arguments={'use_sim_time': use_sim_time,
+                          'drone_id': LaunchConfiguration('drone_id'),
+                          'auto_takeoff': LaunchConfiguration('auto_takeoff')}.items()
     )
 
     # 8. Strict Deterministic Execution Handoff
     spawn_exit_event = RegisterEventHandler(
         event_handler=OnProcessExit(
             target_action=spawn_entity_harmonic,
-            on_exit=[ardupilot_sitl, swarm_bringup] 
+            on_exit=[ardupilot_sitl, bridge_node, sim_radar, swarm_bringup] 
         )
     )
 
@@ -114,11 +138,19 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='true'),
+        DeclareLaunchArgument('auto_takeoff', default_value='false',
+                              description='true runs the arm/takeoff handshake'),
+        DeclareLaunchArgument('gz_seed', default_value='1', description='Gazebo random seed'),
+        DeclareLaunchArgument('radar_seed', default_value='1', description='Radar emulator noise seed'),
+        DeclareLaunchArgument('radar_bias_x', default_value='0.0',
+                              description='Radar constant bias on body x, m/s (always a decimal)'),
+        DeclareLaunchArgument('drone_id', default_value='1',
+                              description='Zenoh drone_id of this vehicle'),
         DeclareLaunchArgument(
-            'camera_rate', default_value='15',
-            description='Camera update rate in Hz. 15 suits software-rendered hosts; pass 30 on GPU hosts.'),
-        DeclareLaunchArgument('camera_width', default_value='160', description='Camera image width in pixels'),
-        DeclareLaunchArgument('camera_height', default_value='120', description='Camera image height in pixels'),
+            'camera_rate', default_value='30',
+            description='Camera update rate in Hz'),
+        DeclareLaunchArgument('camera_width', default_value='320', description='Camera image width in pixels'),
+        DeclareLaunchArgument('camera_height', default_value='240', description='Camera image height in pixels'),
         robot_state_publisher,
         gz_sim,
         spawn_entity_harmonic,
