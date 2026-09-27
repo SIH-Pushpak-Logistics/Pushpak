@@ -293,41 +293,22 @@ message Heartbeat {
 ```
 
 Measured serialized sizes (round-trip verified): `SubMapKeyframe` 29 B typical,
-35 B worst case · `SurvivorEvent` ≤ 29 B · `Heartbeat` ≤ 11 B. All under 50 B.
+35 B at operational extremes, and up to 54 B at unrestricted `int32` extremes;
+`SurvivorEvent` ≤ 29 B and `Heartbeat` ≤ 11 B. These are protobuf payload sizes,
+excluding Zenoh/TCP framing overhead.
 Proto3 has no 16-bit integer type; `sint32` with zigzag encoding costs the same bytes
 for centidegree values.
 
 **Version pin: 1.0.0**, identical in the Dockerfile (`ZENOH_VERSION`), the Python `eclipse-zenoh==1.0.0` package and the Rust crate (`zenoh = "=1.0.0"`).
 
-Build and test the routerless Rust peer:
+Wire validation contract: reject protobuf payloads over 50 B and messages whose
+`drone_id` disagrees with the session or topic key. Every Rust and Python peer,
+including the gateway, must apply these same rules before accepting a message.
 
-```bash
-cargo test --manifest-path src/pushpak_telemetry/Cargo.toml
-cargo run --release --manifest-path src/pushpak_peer/Cargo.toml -- \
-  --drone-id 3 --keyframes path/to/keyframes.csv
-```
-
-Run another laptop with a different `--drone-id`. Multicast scouting is enabled by
-default; when a network blocks it, add one or more explicit peer endpoints such as
-`--listen tcp/0.0.0.0:7447` on one peer and `--connect tcp/192.168.1.20:7447`
-on the other. Neither command starts or requires `zenohd`.
-
-Use `--locked` for reproducible builds and tests. The internal Zenoh crates are
-also pinned to 1.0.0 because that release's caret dependencies otherwise select
-incompatible later internals. See [two-machine acceptance](docs/ZENOH_TWO_LAPTOP_TEST.md).
-
-Telemetry rejects payloads larger than 50 bytes and IDs that disagree with the
-session or topic. The frozen proto permits a 54-byte keyframe at unrestricted
-32-bit extremes; therefore a universal <=50-byte schema guarantee is impossible.
-The operational-angle boundary test fits within 50 bytes, while a separate test
-records the 54-byte schema limit. This limit excludes Zenoh/TCP framing overhead.
-
-`peers_alive(timeout)` tracks valid heartbeats immediately after opening a peer,
-even without `subscribe_all`. Callbacks run on Zenoh threads and should return
-quickly. Replay uses CSV timestamps to select the most recent pose at 5 Hz,
-loops with a 200 ms final hold, and stamps both heartbeat and keyframe from the
-same elapsed replay clock (wrapping at uint32 milliseconds). Real ROS producers
-must supply their own simulation/ROS timestamps through the library API.
+Build and run the routerless peer with `--locked` as described in the
+[two-laptop acceptance test](docs/ZENOH_TWO_LAPTOP_TEST.md). The
+[Rust-to-Python heartbeat check](docs/RUST_PYTHON_HEARTBEAT_CHECK.md) verifies
+cross-language decoding; both tests run without `zenohd`.
 
 ---
 
