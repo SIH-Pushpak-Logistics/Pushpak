@@ -585,6 +585,46 @@ class TTARotation:
         orig_y = sq_y - float(offset_y)
         return orig_x, orig_y
 
+    @classmethod
+    def map_rotated_bbox_to_original(
+        cls,
+        bx1: float,
+        by1: float,
+        bx2: float,
+        by2: float,
+        rotation_matrix: np.ndarray,
+        offset_x: int,
+        offset_y: int,
+    ) -> Tuple[float, float, float, float]:
+        """
+        Map a rotated bounding box back to an axis-aligned bounding box
+        in the original image coordinate frame.
+
+        Returns:
+            (orig_cx, orig_cy, orig_w, orig_h)
+        """
+        corners = [
+            (bx1, by1),
+            (bx2, by1),
+            (bx2, by2),
+            (bx1, by2),
+        ]
+        mapped_corners = [
+            cls.map_rotated_point_to_original(px, py, rotation_matrix, offset_x, offset_y)
+            for px, py in corners
+        ]
+        xs = [pt[0] for pt in mapped_corners]
+        ys = [pt[1] for pt in mapped_corners]
+        min_x = min(xs)
+        max_x = max(xs)
+        min_y = min(ys)
+        max_y = max(ys)
+        orig_cx = (min_x + max_x) * 0.5
+        orig_cy = (min_y + max_y) * 0.5
+        orig_w = max_x - min_x
+        orig_h = max_y - min_y
+        return orig_cx, orig_cy, orig_w, orig_h
+
     @staticmethod
     def is_point_inside_image(
         x: float,

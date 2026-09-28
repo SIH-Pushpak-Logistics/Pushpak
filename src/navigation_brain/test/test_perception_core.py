@@ -550,3 +550,29 @@ class TestTTARotation:
             drone_qw=1.0,
         )
         assert not math.isclose(pt_unmapped[0], 5.0, abs_tol=0.1) or not math.isclose(pt_unmapped[1], 5.0, abs_tol=0.1)
+
+
+    def test_map_rotated_bbox_dimensions_transformation(self):
+        """
+        Verify that map_rotated_bbox_to_original correctly transforms
+        bounding box dimensions (width/height) from rotated to original frame,
+        while preserving the center.
+        """
+        w, h = 320, 240
+        s, ox, oy = TTARotation.compute_square_padding(w, h)
+
+        # 90 degrees rotation:
+        # A box of width 20, height 40 in rotated image was width 40, height 20 in original image
+        rot_img, M = TTARotation.rotate_image(np.zeros((s, s), dtype=np.uint8), 90.0, s)
+        bx1, by1, bx2, by2 = 190.0, 180.0, 210.0, 220.0  # bw=20, bh=40, center=(200, 200)
+
+        cx, cy, orig_w, orig_h = TTARotation.map_rotated_bbox_to_original(
+            bx1, by1, bx2, by2, M, ox, oy
+        )
+
+        # At 90 deg rotation, dimensions swap: width becomes 40, height becomes 20
+        assert math.isclose(orig_w, 40.0, abs_tol=0.5)
+        assert math.isclose(orig_h, 20.0, abs_tol=0.5)
+        # Center in square was (200, 200). Rotated back: (200, 200). Minus offset (40, 80) -> (160, 120)
+        assert math.isclose(cx, 160.0, abs_tol=0.5)
+        assert math.isclose(cy, 120.0, abs_tol=0.5)

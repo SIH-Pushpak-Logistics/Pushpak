@@ -556,13 +556,9 @@ class PerceptionNode(Node):
 
                         xyxy = box.xyxy[0].tolist() if hasattr(box.xyxy, 'tolist') else list(box.xyxy[0])
                         bx1, by1, bx2, by2 = xyxy
-                        cx_rot = (bx1 + bx2) * 0.5
-                        cy_rot = (by1 + by2) * 0.5
-                        bw = bx2 - bx1
-                        bh = by2 - by1
 
-                        orig_cx, orig_cy = TTARotation.map_rotated_point_to_original(
-                            cx_rot, cy_rot, M, offset_x, offset_y
+                        orig_cx, orig_cy, orig_w, orig_h = TTARotation.map_rotated_bbox_to_original(
+                            bx1, by1, bx2, by2, M, offset_x, offset_y
                         )
 
                         if not TTARotation.is_point_inside_image(orig_cx, orig_cy, w, h):
@@ -572,8 +568,8 @@ class PerceptionNode(Node):
                             TTADetection(
                                 cx=orig_cx,
                                 cy=orig_cy,
-                                width=bw,
-                                height=bh,
+                                width=orig_w,
+                                height=orig_h,
                                 confidence=conf,
                             )
                         )
