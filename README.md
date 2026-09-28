@@ -479,7 +479,7 @@ State these before judges find them.
 | Hardware inventory and rig tier (1/2/3) | Kanishk | Day 1, **overdue** |
 | HaLow channel-plan legality in India (design target) | Kanishk | before the deck freezes |
 | Pin rustc 1.98.1 in `Dockerfile`; delete build dirs in the same layer to shrink the image | Ashutosh | next Dockerfile change |
-| ArduPilot SITL panics on entering LAND (`Location::get_alt_cm` on an uninitialised location): the FCU reports lat/lon 0 during flight although EKF3 logs "origin set". FS-4 and FS_EKF LAND therefore freeze SITL; FS-4 detection and the LAND request are verified | Ashutosh | before recording the FS-4 clip |
+| SITL LAND panic (`Location::get_alt_cm` on an uninitialised location) not reproduced on 28 Sep: on a clean launch, after a 53 s hover, killing `pushpak_brain` fired FS-4 in 1.05 s and the vehicle landed and disarmed 5.1 s later (bag `fs4_land_2_2026-09-27`). In hover the FCU rangefinder read 1.63 m and the FCU global position stayed 0/0, so LAND took the rangefinder route. Likely remaining panic path: rangefinder unhealthy when LAND starts, falling back to a location with no lat/lon. Operating rule: LAND begins inside the rangefinder range (0.10–4.0 m). Conditions of the original failure were not recorded; 27 Sep evening runs also had nodes surviving from earlier launches (fixed in `launch_sim.sh`). | Ashutosh | residual; recheck if flight altitude changes |
 
 ### Tripwires
 
