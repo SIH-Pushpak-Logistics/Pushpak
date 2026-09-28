@@ -2,7 +2,8 @@ import math
 
 import pytest
 
-from pushpak_brain.exploration import advance, lawnmower, p_velocity, path_length, validate_gains
+from pushpak_brain.exploration import (advance, guidance_step, lawnmower, p_velocity, path_length,
+                                       validate_gains)
 
 
 def test_lawnmower_demo_area():
@@ -70,3 +71,37 @@ def test_closed_loop_covers_demo_area_within_budget():
     assert peak <= v_max + 1e-9
     assert t < 80.0
     print(f'closed-loop coverage time {t:.1f} s')
+
+
+WPS = [(1.0, 0.0), (1.0, 1.0)]
+
+
+def _step(pos=(0.0, 0.0), age=0.01, since=10.0, index=0):
+    return guidance_step(pos, age, 0.2, since, 3.0, WPS, index, 0.8, 0.7, 0.25)
+
+
+def test_guidance_stale_or_missing_odometry_holds():
+    assert _step(pos=None) == (0.0, 0.0, 0, 'stale')
+    assert _step(age=None) == (0.0, 0.0, 0, 'stale')
+    assert _step(age=0.5) == (0.0, 0.0, 0, 'stale')
+    assert _step(age=float('nan')) == (0.0, 0.0, 0, 'stale')
+
+
+def test_guidance_slightly_future_odometry_is_fresh():
+    assert _step(age=-0.005)[3] == 'explore'
+
+
+def test_guidance_waits_for_start_delay():
+    assert _step(since=1.0) == (0.0, 0.0, 0, 'wait')
+
+
+def test_guidance_explores_toward_current_waypoint():
+    vx, vy, idx, status = _step()
+    assert status == 'explore' and idx == 0
+    assert (vx, vy) == pytest.approx((0.7, 0.0))
+
+
+def test_guidance_advances_then_finishes_and_holds():
+    assert _step(pos=(1.0, 0.1))[2:] == (1, 'explore')
+    assert _step(pos=(1.0, 1.0), index=1) == (0.0, 0.0, 2, 'done')
+    assert _step(pos=(5.0, 5.0), index=2) == (0.0, 0.0, 2, 'done')

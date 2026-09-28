@@ -48,3 +48,16 @@ def advance(waypoints, index, pos, accept_radius_m):
             break
         index += 1
     return index
+
+
+def guidance_step(pos, odom_age_s, max_odom_age_s, since_airborne_s, start_delay_s,
+                  waypoints, index, kp, v_max_mps, accept_radius_m):
+    if pos is None or odom_age_s is None or not math.isfinite(odom_age_s) or odom_age_s > max_odom_age_s:
+        return 0.0, 0.0, index, 'stale'
+    if since_airborne_s < start_delay_s:
+        return 0.0, 0.0, index, 'wait'
+    index = advance(waypoints, index, pos, accept_radius_m)
+    if index >= len(waypoints):
+        return 0.0, 0.0, index, 'done'
+    vx, vy = p_velocity(pos, waypoints[index], kp, v_max_mps)
+    return vx, vy, index, 'explore'

@@ -1,0 +1,21 @@
+pushpak_brain:
+  ros__parameters:
+    rate_hz: 20.0
+    kp: 0.8
+    v_max_mps: 0.7
+    explore_x_min_m: -3.0
+    explore_x_max_m: 3.0
+    explore_y_min_m: -3.0
+    explore_y_max_m: 3.0
+    explore_lane_spacing_m: 1.5
+    explore_accept_radius_m: 0.25
+    explore_start_delay_s: 3.0
+    odom_max_age_s: 0.2
+    keyframe_rate_hz: 5.0
+    keyframe_fifo_len: 200
+    survivor_dedup_radius_m: 1.5
+    isolation_timeout_s: 2.0
+    visual_dropout_variance: 1000000.0
+    backtrack_cov_threshold: 0.2
+    backtrack_speed_mps: 1.0
+    backtrack_accept_radius_m: 0.4

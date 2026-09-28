@@ -16,6 +16,7 @@ def generate_launch_description():
         'drone_id': ParameterValue(LaunchConfiguration('drone_id'), value_type=int),
     }
     ekf_config = os.path.join(get_package_share_directory('navigation_brain'), 'config', 'ekf_15state.yaml')
+    pushpak_params = os.path.join(get_package_share_directory('drone_bringup'), 'config', 'pushpak_params.yaml')
 
     onboard_nodes = [
         Node(package='navigation_brain', executable=exe, name=exe,
@@ -25,7 +26,7 @@ def generate_launch_description():
     ekf = Node(package='robot_localization', executable='ekf_node', name='ekf_node',
                output='screen', parameters=[ekf_config, {'use_sim_time': use_sim_time}])
     brain = Node(package='pushpak_brain', executable='pushpak_brain', name='pushpak_brain',
-                 output='screen', parameters=[common])
+                 output='screen', parameters=[pushpak_params, common])
     handshake = Node(package='navigation_brain', executable='arm_takeoff_handshake',
                      name='arm_takeoff_handshake', output='screen',
                      parameters=[{'use_sim_time': use_sim_time}],
