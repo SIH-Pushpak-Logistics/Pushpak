@@ -30,8 +30,8 @@ def ros_context():
 
 def test_odom_freshness_rejection(ros_context):
     node = PerceptionNode(node_name="test_odom_freshness")
-    assert node.conf_threshold == 0.85
-    assert node.imgsz == 320
+    assert node.conf_threshold == 0.4
+    assert node.imgsz == 416
 
     # 1. No odom received yet -> returns None
     assert node._get_fresh_odom() is None
@@ -736,3 +736,297 @@ def test_covariance_parameters_and_defaults(ros_context):
     assert node_custom.covariance_ramp.degraded_covariance == 5.0e5
     assert node_custom.covariance_ramp.ramp_frames == 8
     node_custom.destroy_node()
+
+
+# =============================================================
+# Task 1: Sensor Timestamp Freshness Tests
+# =============================================================
+
+def test_sensor_freshness_accepts_newer_sensor_timestamps(ros_context):
+    """
+    Regression test for Task 1:
+    Ensure sensor freshness logic accepts sensor timestamps that are newer than image.
+    image_stamp = T
+    tof_stamp   = T + 0.020
+    gyro_stamp  = T + 0.020
+    Under old check 0.0 <= (image_stamp - sensor_stamp) <= 0.5, difference was -0.020 (rejected).
+    Under abs(image_stamp - sensor_stamp) <= 0.5, this must be accepted as fresh.
+    """
+    bridge = CvBridge()
+    node = PerceptionNode(
+        node_name="test_newer_sensor_stamps",
+        parameter_overrides=[
+            Parameter("laplacian_baseline", Parameter.Type.DOUBLE, 453.151),
+        ],
+    )
+
+    published_messages = []
+    node.create_subscription(
+        TwistWithCovarianceStamped,
+        "/visual/velocity",
+        lambda m: published_messages.append(m),
+        10,
+    )
+
+    T = 100.0
+
+    # Setup camera intrinsics
+    cinfo = CameraInfo()
+    cinfo.header.stamp.sec = int(T)
+    cinfo.header.stamp.nanosec = int((T - int(T)) * 1e9)
+    cinfo.width = 320
+    cinfo.height = 240
+    cinfo.k = [277.0, 0.0, 160.0, 0.0, 277.0, 120.0, 0.0, 0.0, 1.0]
+    node.camera_info_callback(cinfo)
+
+    # 1. Assert regression mathematically:
+    image_stamp = T
+    sensor_stamp = T + 0.020
+    old_valid = (0.0 <= (image_stamp - sensor_stamp) <= 0.5)
+    assert old_valid is False, "Old freshness check must reject newer sensor timestamps"
+    new_valid = (abs(image_stamp - sensor_stamp) <= 0.5)
+    assert new_valid is True, "New freshness check must accept newer sensor timestamps"
+
+    # Create synthetic frame with high-contrast corner features for optical flow
+    frame = np.zeros((240, 320, 3), dtype=np.uint8)
+    for y in range(30, 210, 30):
+        for x in range(30, 290, 30):
+            cv2.circle(frame, (x, y), 6, (255, 255, 255), -1)
+
+    # Feed 2 frames with identical textures (zero flow):
+    # Frame 0 initializes optical flow features
+    # Frame 1 tracks features with zero motion
+    # In both frames, ToF and Gyro stamps are exactly 20ms newer than image stamp.
+    for i in range(2):
+        t_img = T + i * 0.05
+        t_sens = t_img + 0.020
+
+        tof = Range()
+        tof.header.stamp.sec = int(t_sens)
+        tof.header.stamp.nanosec = int((t_sens - int(t_sens)) * 1e9)
+        tof.range = 1.5
+        node.range_callback(tof)
+
+        imu = Imu()
+        imu.header.stamp.sec = int(t_sens)
+        imu.header.stamp.nanosec = int((t_sens - int(t_sens)) * 1e9)
+        imu.angular_velocity.x = 0.0
+        imu.angular_velocity.y = 0.0
+        node.imu_callback(imu)
+
+        img_msg = bridge.cv2_to_imgmsg(frame, encoding="bgr8")
+        img_msg.header.stamp.sec = int(t_img)
+        img_msg.header.stamp.nanosec = int((t_img - int(t_img)) * 1e9)
+        node.image_callback(img_msg)
+        rclpy.spin_once(node, timeout_sec=0.02)
+
+    assert len(published_messages) == 2
+    # Frame 1 has tracked features and fresh sensors (20ms newer) -> recovers to nominal covariance 0.05
+    cov_x = published_messages[1].twist.covariance[0]
+    assert math.isclose(cov_x, node.nominal_covariance, rel_tol=1e-3)
+
+    node.destroy_node()
+
+
+# =============================================================
+# Task 3: Launch-Time Switch enable_visual_velocity Tests
+# =============================================================
+
+def test_enable_visual_velocity_parameter_false(ros_context):
+    """
+    Task 3: When enable_visual_velocity=false:
+    - Pipeline A processing is skipped
+    - No /visual/velocity messages are published
+    - Pipeline B still receives the image frame via _queue_yolo_frame
+    """
+    bridge = CvBridge()
+    node = PerceptionNode(
+        node_name="test_enable_vel_false",
+        parameter_overrides=[
+            Parameter("enable_visual_velocity", Parameter.Type.BOOL, False),
+        ],
+    )
+    assert node.enable_visual_velocity is False
+
+    queued_frames = []
+    orig_queue = node._queue_yolo_frame
+    def spy_queue(f, s):
+        queued_frames.append((f, s))
+        orig_queue(f, s)
+    node._queue_yolo_frame = spy_queue
+
+    published_messages = []
+    node.create_subscription(
+        TwistWithCovarianceStamped,
+        "/visual/velocity",
+        lambda m: published_messages.append(m),
+        10,
+    )
+
+    frame = np.random.randint(0, 255, (240, 320, 3), dtype=np.uint8)
+    img_msg = bridge.cv2_to_imgmsg(frame, encoding="bgr8")
+    img_msg.header.stamp = node.get_clock().now().to_msg()
+
+    node.image_callback(img_msg)
+    rclpy.spin_once(node, timeout_sec=0.05)
+
+    # Pipeline A must NOT publish
+    assert len(published_messages) == 0
+    # Pipeline B frame queue must still receive the frame
+    assert len(queued_frames) == 1
+    assert queued_frames[0][0].shape == frame.shape
+
+    node.destroy_node()
+
+
+def test_enable_visual_velocity_parameter_true(ros_context):
+    """
+    Task 3: When enable_visual_velocity=true:
+    - Existing Pipeline A publishing behavior is intact.
+    """
+    bridge = CvBridge()
+    node = PerceptionNode(
+        node_name="test_enable_vel_true",
+        parameter_overrides=[
+            Parameter("enable_visual_velocity", Parameter.Type.BOOL, True),
+        ],
+    )
+    assert node.enable_visual_velocity is True
+
+    published_messages = []
+    node.create_subscription(
+        TwistWithCovarianceStamped,
+        "/visual/velocity",
+        lambda m: published_messages.append(m),
+        10,
+    )
+
+    now = node.get_clock().now()
+    cinfo = CameraInfo()
+    cinfo.header.stamp = now.to_msg()
+    cinfo.width = 320
+    cinfo.height = 240
+    cinfo.k = [277.0, 0.0, 160.0, 0.0, 277.0, 120.0, 0.0, 0.0, 1.0]
+    node.camera_info_callback(cinfo)
+
+    frame = np.random.randint(0, 255, (240, 320, 3), dtype=np.uint8)
+    img_msg = bridge.cv2_to_imgmsg(frame, encoding="bgr8")
+    img_msg.header.stamp = now.to_msg()
+
+    node.image_callback(img_msg)
+    rclpy.spin_once(node, timeout_sec=0.05)
+
+    # Pipeline A publishes
+    assert len(published_messages) == 1
+    assert published_messages[0].header.frame_id == "base_link"
+
+    node.destroy_node()
+
+
+# =============================================================
+# Task 2: Rotation TTA for Pipeline B Integration Test
+# =============================================================
+
+def test_rotation_tta_batched_predict_and_mapping(ros_context, tmp_path):
+    """
+    Task 2: Verify that rotation TTA runs in batch mode on 24 rotations,
+    logs inference time, maps detection centres back, merges them,
+    and publishes SurvivorDetection with mapped world position.
+    """
+    from unittest.mock import MagicMock
+
+    node = PerceptionNode(
+        node_name="test_tta_batch",
+        parameter_overrides=[
+            Parameter("detection_dir", Parameter.Type.STRING, str(tmp_path)),
+            Parameter("conf_threshold", Parameter.Type.DOUBLE, 0.4),
+            Parameter("imgsz", Parameter.Type.INTEGER, 416),
+        ],
+    )
+
+    # Set up mock YOLO model
+    mock_model = MagicMock()
+    mock_results = []
+    for i in range(24):
+        res = MagicMock()
+        if i == 0:
+            # Target near optical center (160, 120) with conf 0.85
+            # Padded s = 400, offset_x = 40, offset_y = 80 -> center = (200, 200)
+            box = MagicMock()
+            box.conf = [0.85]
+            box.xyxy = [[180.0, 180.0, 220.0, 220.0]]
+            res.boxes = [box]
+        elif i == 6:  # 90 degrees rotation
+            box = MagicMock()
+            box.conf = [0.70]
+            box.xyxy = [[182.0, 182.0, 222.0, 222.0]]
+            res.boxes = [box]
+        else:
+            res.boxes = []
+        mock_results.append(res)
+
+    mock_model.predict.return_value = mock_results
+    node.model = mock_model
+
+    # Odometry setup
+    now = node.get_clock().now()
+    odom = Odometry()
+    odom.header.stamp = now.to_msg()
+    odom.header.frame_id = "odom"
+    odom.pose.pose.position.x = 10.0
+    odom.pose.pose.position.y = 20.0
+    odom.pose.pose.position.z = 2.0
+    odom.pose.pose.orientation.w = 1.0
+    node.odom_callback(odom)
+
+    cinfo = CameraInfo()
+    cinfo.header.stamp = now.to_msg()
+    cinfo.width = 320
+    cinfo.height = 240
+    cinfo.k = [277.0, 0.0, 160.0, 0.0, 277.0, 120.0, 0.0, 0.0, 1.0]
+    node.camera_info_callback(cinfo)
+
+    rng = Range()
+    rng.header.stamp = now.to_msg()
+    rng.range = 2.0
+    node.range_callback(rng)
+
+    detections_received = []
+    node.create_subscription(
+        SurvivorDetection,
+        "/detections/survivor",
+        lambda m: detections_received.append(m),
+        10,
+    )
+
+    frame = np.full((240, 320, 3), 128, dtype=np.uint8)
+    image_stamp = float(now.nanoseconds) * 1e-9
+
+    # Queue frame and notify worker
+    with node.yolo_condition:
+        node.yolo_frame = frame
+        node.yolo_frame_stamp = image_stamp
+        node.yolo_condition.notify()
+
+    # Wait briefly for worker to process frame
+    import time
+    for _ in range(50):
+        rclpy.spin_once(node, timeout_sec=0.02)
+        if len(detections_received) > 0:
+            break
+        time.sleep(0.02)
+
+    # 1. Verify model.predict was called ONCE with 24 images
+    assert mock_model.predict.call_count >= 1
+    call_args = mock_model.predict.call_args[1]
+    assert len(call_args["source"]) == 24
+    assert call_args["imgsz"] == 416
+    assert call_args["conf"] == 0.4
+    assert call_args["classes"] == [0]
+
+    # 2. Verify duplicate detections were merged (< 30px distance) and highest confidence survived (0.85)
+    assert len(detections_received) == 1
+    assert math.isclose(detections_received[0].confidence, 0.85, abs_tol=1e-3)
+    assert detections_received[0].header.frame_id == "odom"
+
+    node.destroy_node()

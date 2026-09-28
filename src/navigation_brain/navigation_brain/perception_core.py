@@ -485,3 +485,141 @@ class WorldProjector:
             return None
 
         return (float(world_x), float(world_y), float(world_z))
+
+DEFAULT_TTA_ANGLES: List[int] = [
+    0, 15, 30, 45, 60, 75, 90, 105, 120, 135, 150, 165,
+    180, 195, 210, 225, 240, 255, 270, 285, 300, 315, 330, 345,
+]
+
+
+@dataclass(frozen=True)
+class TTADetection:
+    """
+    Representation of a detection mapped back to the original image coordinate frame.
+
+    Attributes:
+        cx: Center x coordinate in original image pixels.
+        cy: Center y coordinate in original image pixels.
+        width: Bounding box width in pixels.
+        height: Bounding box height in pixels.
+        confidence: Detection confidence score (0.0 to 1.0).
+    """
+    cx: float
+    cy: float
+    width: float
+    height: float
+    confidence: float
+
+
+class TTARotation:
+    """
+    Utilities for rotation test-time augmentation (TTA) on top-down images.
+    """
+
+    @staticmethod
+    def compute_square_padding(width: int, height: int) -> Tuple[int, int, int]:
+        """
+        Calculate square side length s and offsets to center a w x h image.
+
+        s = ceil(hypot(h, w))
+        offset_x = (s - width) // 2
+        offset_y = (s - height) // 2
+        """
+        s = int(math.ceil(math.hypot(height, width)))
+        offset_x = (s - width) // 2
+        offset_y = (s - height) // 2
+        return s, offset_x, offset_y
+
+    @classmethod
+    def create_square_padded_image(
+        cls,
+        frame: np.ndarray,
+        s: int,
+        offset_x: int,
+        offset_y: int,
+    ) -> np.ndarray:
+        """
+        Place the original frame in the center of an s x s square image.
+        """
+        h, w = frame.shape[:2]
+        if frame.ndim == 3:
+            padded = np.zeros((s, s, frame.shape[2]), dtype=frame.dtype)
+        else:
+            padded = np.zeros((s, s), dtype=frame.dtype)
+        padded[offset_y:offset_y + h, offset_x:offset_x + w] = frame
+        return padded
+
+    @staticmethod
+    def rotate_image(
+        padded_image: np.ndarray,
+        angle_deg: float,
+        s: int,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Rotate the square image around its center (s/2, s/2).
+
+        Returns:
+            (rotated_image, 2x3 affine rotation_matrix)
+        """
+        center = (s / 2.0, s / 2.0)
+        M = cv2.getRotationMatrix2D(center, float(angle_deg), 1.0)
+        rotated = cv2.warpAffine(padded_image, M, (s, s))
+        return rotated, M
+
+    @staticmethod
+    def map_rotated_point_to_original(
+        cx_rot: float,
+        cy_rot: float,
+        rotation_matrix: np.ndarray,
+        offset_x: int,
+        offset_y: int,
+    ) -> Tuple[float, float]:
+        """
+        Invert rotation affine transform and subtract padding offset
+        to recover coordinates in the original image.
+        """
+        M_inv = cv2.invertAffineTransform(rotation_matrix)
+        sq_x = float(M_inv[0, 0] * cx_rot + M_inv[0, 1] * cy_rot + M_inv[0, 2])
+        sq_y = float(M_inv[1, 0] * cx_rot + M_inv[1, 1] * cy_rot + M_inv[1, 2])
+        orig_x = sq_x - float(offset_x)
+        orig_y = sq_y - float(offset_y)
+        return orig_x, orig_y
+
+    @staticmethod
+    def is_point_inside_image(
+        x: float,
+        y: float,
+        width: int,
+        height: int,
+    ) -> bool:
+        """
+        Verify if (x, y) lies strictly inside the [0, width) x [0, height) frame.
+        """
+        return 0.0 <= x < float(width) and 0.0 <= y < float(height)
+
+    @staticmethod
+    def merge_detections(
+        detections: List[TTADetection],
+        distance_threshold: float = 30.0,
+    ) -> List[TTADetection]:
+        """
+        Merge detections whose mapped-back centers are closer than distance_threshold (30px).
+        Preserves the detection with the highest confidence in each group.
+        """
+        if not detections:
+            return []
+
+        sorted_dets = sorted(detections, key=lambda d: d.confidence, reverse=True)
+        merged: List[TTADetection] = []
+
+        for det in sorted_dets:
+            is_dup = False
+            for accepted in merged:
+                dist = math.hypot(det.cx - accepted.cx, det.cy - accepted.cy)
+                if dist < distance_threshold:
+                    is_dup = True
+                    break
+            if not is_dup:
+                merged.append(det)
+
+        return merged

@@ -16,7 +16,8 @@ This node serves as the ROS 2 integration layer.
 import math
 import os
 import threading
-from typing import Optional
+import time
+from typing import List, Optional
 
 import cv2
 from cv_bridge import CvBridge, CvBridgeError
@@ -33,9 +34,12 @@ from drone_interfaces.msg import SurvivorDetection
 from navigation_brain.perception_core import (
     CameraIntrinsics,
     CovarianceRamp,
+    DEFAULT_TTA_ANGLES,
     ImageQualityEvaluator,
     ImageQualityResult,
     OpticalFlowTracker,
+    TTADetection,
+    TTARotation,
     WorldProjector,
 )
 
@@ -58,10 +62,11 @@ class PerceptionNode(Node):
         # ---------------------------------------------------------
         # Parameters
         # ---------------------------------------------------------
+        self.declare_parameter('enable_visual_velocity', True)
         self.declare_parameter('model_path', '/workspace/yolov8n.pt')
         self.declare_parameter('device', 'cuda:0')
-        self.declare_parameter('imgsz', 320)
-        self.declare_parameter('conf_threshold', 0.85)
+        self.declare_parameter('imgsz', 416)
+        self.declare_parameter('conf_threshold', 0.4)
         self.declare_parameter('max_rate_hz', 2.0)
         self.declare_parameter('odom_staleness_sec', 0.5)
         self.declare_parameter('laplacian_baseline', 0.0)
@@ -72,13 +77,23 @@ class PerceptionNode(Node):
         self.declare_parameter('degraded_covariance', 1.0e6)
         self.declare_parameter('ramp_frames', 5)
         self.declare_parameter('detection_dir', '/workspace/detections')
+        self.declare_parameter('tta_angles_deg', DEFAULT_TTA_ANGLES)
 
-        self.model_path = self.get_parameter('model_path').get_parameter_value().string_value
-        self.device = self.get_parameter('device').get_parameter_value().string_value
-        self.imgsz = self.get_parameter('imgsz').get_parameter_value().integer_value
-        self.conf_threshold = self.get_parameter('conf_threshold').get_parameter_value().double_value
-        self.max_rate_hz = self.get_parameter('max_rate_hz').get_parameter_value().double_value
-        self.odom_staleness_sec = self.get_parameter('odom_staleness_sec').get_parameter_value().double_value
+        self.enable_visual_velocity = bool(self.get_parameter('enable_visual_velocity').value)
+        self.model_path = str(self.get_parameter('model_path').value)
+        self.device = str(self.get_parameter('device').value)
+        self.imgsz = int(self.get_parameter('imgsz').value)
+        self.conf_threshold = float(self.get_parameter('conf_threshold').value)
+        self.max_rate_hz = float(self.get_parameter('max_rate_hz').value)
+        self.odom_staleness_sec = float(self.get_parameter('odom_staleness_sec').value)
+
+        tta_val = self.get_parameter('tta_angles_deg').value
+        if isinstance(tta_val, (list, tuple)):
+            self.tta_angles_deg = [int(x) for x in tta_val]
+        elif isinstance(tta_val, str):
+            self.tta_angles_deg = [int(x.strip()) for x in tta_val.split(',') if x.strip()]
+        else:
+            self.tta_angles_deg = list(DEFAULT_TTA_ANGLES)
         self.laplacian_baseline = self.get_parameter('laplacian_baseline').get_parameter_value().double_value
         self.laplacian_baseline_frames = max(
             1,
@@ -321,7 +336,11 @@ class PerceptionNode(Node):
         # 2. Queue latest color frame for Pipeline B
         self._queue_yolo_frame(bgr_frame, image_stamp)
 
-        # 3. Snapshot sensor state
+        # 3. Skip Pipeline A if disabled at launch time
+        if not self.enable_visual_velocity:
+            return
+
+        # 4. Snapshot sensor state
         with self.state_lock:
             camera_ready = self.camera_info_ready
             intrinsics = self.intrinsics
@@ -334,13 +353,13 @@ class PerceptionNode(Node):
         altitude_valid = (
             altitude is not None
             and altitude_stamp is not None
-            and 0.0 <= (image_stamp - altitude_stamp) <= 0.5
+            and abs(image_stamp - altitude_stamp) <= 0.5
             and math.isfinite(altitude)
             and altitude > 0.0
         )
         is_airborne = altitude_valid and (altitude >= self.laplacian_calibration_min_altitude_m)
 
-        # 4. Evaluate image quality (dust/blur degradation) and auto-calibrate if needed
+        # 5. Evaluate image quality (dust/blur degradation) and auto-calibrate if needed
         variance = ImageQualityEvaluator.compute_variance(gray)
 
         if not self.baseline_calibrated:
@@ -372,11 +391,11 @@ class PerceptionNode(Node):
         else:
             quality_result = self.quality_evaluator.evaluate(gray)
 
-        # 5. Check sensor prerequisites
+        # 6. Check sensor prerequisites
         intrinsics_valid = camera_ready and intrinsics is not None and intrinsics.fx > 0.0
         gyro_valid = (
             gyro_stamp is not None
-            and 0.0 <= (image_stamp - gyro_stamp) <= 0.5
+            and abs(image_stamp - gyro_stamp) <= 0.5
             and math.isfinite(gyro_x)
             and math.isfinite(gyro_y)
         )
@@ -386,7 +405,7 @@ class PerceptionNode(Node):
             self._publish_velocity(msg, vx=0.0, vy=0.0, is_degraded=True)
             return
 
-        # 6. Compute optical flow velocity
+        # 7. Compute optical flow velocity
         flow_result = self.flow_tracker.process_frame(
             gray=gray,
             timestamp_sec=image_stamp,
@@ -398,7 +417,7 @@ class PerceptionNode(Node):
 
         effective_degraded = quality_result.is_degraded or (not flow_result.is_valid)
 
-        # 7. Publish visual velocity (never stops publishing)
+        # 8. Publish visual velocity (never stops publishing)
         self._publish_velocity(
             msg,
             vx=flow_result.vx if flow_result.is_valid else 0.0,
@@ -450,21 +469,6 @@ class PerceptionNode(Node):
         """
         Background worker thread executing YOLO inference and publishing survivor detections.
         """
-        if not HAVE_ULTRALYTICS:
-            self.get_logger().error("Ultralytics YOLO not installed; Pipeline B disabled.")
-            return
-
-        # Load YOLO model
-        try:
-            self.get_logger().info(f"Loading YOLO model from {self.model_path} onto {self.device}")
-            model = YOLO(self.model_path)
-            model.to(self.device)
-            self.model = model
-            self.get_logger().info("YOLO model loaded successfully.")
-        except Exception as exc:
-            self.get_logger().error(f"Failed to load YOLO model: {exc}")
-            return
-
         while rclpy.ok() and not self.yolo_stop_event.is_set():
             with self.yolo_condition:
                 while self.yolo_frame is None and not self.yolo_stop_event.is_set():
@@ -481,6 +485,21 @@ class PerceptionNode(Node):
             if frame is None or frame_stamp is None:
                 continue
 
+            # Lazy model initialization
+            if self.model is None:
+                if not HAVE_ULTRALYTICS:
+                    self.get_logger().error("Ultralytics YOLO not installed; Pipeline B disabled.")
+                    continue
+                try:
+                    self.get_logger().info(f"Loading YOLO model from {self.model_path} onto {self.device}")
+                    model = YOLO(self.model_path)
+                    model.to(self.device)
+                    self.model = model
+                    self.get_logger().info("YOLO model loaded successfully.")
+                except Exception as exc:
+                    self.get_logger().error(f"Failed to load YOLO model: {exc}")
+                    continue
+
             # Throttle to max_rate_hz
             if self.last_yolo_stamp is not None:
                 elapsed = frame_stamp - self.last_yolo_stamp
@@ -489,10 +508,23 @@ class PerceptionNode(Node):
 
             self.last_yolo_stamp = frame_stamp
 
-            # Run inference on CUDA with person class (0)
+            # Rotation Test-Time Augmentation (TTA)
+            t_start = time.perf_counter()
+            h, w = frame.shape[:2]
+            s, offset_x, offset_y = TTARotation.compute_square_padding(w, h)
+            padded = TTARotation.create_square_padded_image(frame, s, offset_x, offset_y)
+
+            batch = []
+            rot_matrices = []
+            for angle in self.tta_angles_deg:
+                rot_img, M = TTARotation.rotate_image(padded, angle, s)
+                batch.append(rot_img)
+                rot_matrices.append(M)
+
+            # Single batched predict call across all rotations
             try:
                 results = self.model.predict(
-                    source=frame,
+                    source=batch,
                     device=self.device,
                     imgsz=self.imgsz,
                     conf=self.conf_threshold,
@@ -503,34 +535,71 @@ class PerceptionNode(Node):
                 self.get_logger().warning(f"YOLO inference error: {exc}")
                 continue
 
+            t_elapsed_ms = (time.perf_counter() - t_start) * 1000.0
+            self.get_logger().info(f"TTA inference: {t_elapsed_ms:.1f} ms/frame")
+
             if not results:
                 continue
 
-            res = results[0]
-            boxes = getattr(res, 'boxes', None)
-            if boxes is None or len(boxes) == 0:
-                continue
+            candidates: List[TTADetection] = []
+            results_list = results if isinstance(results, (list, tuple)) else [results]
+            for res, M in zip(results_list, rot_matrices):
+                boxes = getattr(res, 'boxes', None)
+                if boxes is None or len(boxes) == 0:
+                    continue
 
-            for box in boxes:
-                try:
-                    conf = float(box.conf.item() if hasattr(box.conf, 'item') else box.conf[0])
-                    if conf < self.conf_threshold:
-                        continue
+                for box in boxes:
+                    try:
+                        conf = float(box.conf.item() if hasattr(box.conf, 'item') else box.conf[0])
+                        if conf < self.conf_threshold:
+                            continue
 
-                    xyxy = box.xyxy[0].tolist() if hasattr(box.xyxy, 'tolist') else list(box.xyxy[0])
-                    x1, y1, x2, y2 = xyxy
+                        xyxy = box.xyxy[0].tolist() if hasattr(box.xyxy, 'tolist') else list(box.xyxy[0])
+                        bx1, by1, bx2, by2 = xyxy
+                        cx_rot = (bx1 + bx2) * 0.5
+                        cy_rot = (by1 + by2) * 0.5
+                        bw = bx2 - bx1
+                        bh = by2 - by1
 
-                    self._publish_survivor_detection(
-                        frame=frame,
-                        image_stamp=frame_stamp,
-                        confidence=conf,
-                        x1=x1,
-                        y1=y1,
-                        x2=x2,
-                        y2=y2,
-                    )
-                except Exception as exc:
-                    self.get_logger().warning(f"Error processing YOLO detection box: {exc}")
+                        orig_cx, orig_cy = TTARotation.map_rotated_point_to_original(
+                            cx_rot, cy_rot, M, offset_x, offset_y
+                        )
+
+                        if not TTARotation.is_point_inside_image(orig_cx, orig_cy, w, h):
+                            continue
+
+                        candidates.append(
+                            TTADetection(
+                                cx=orig_cx,
+                                cy=orig_cy,
+                                width=bw,
+                                height=bh,
+                                confidence=conf,
+                            )
+                        )
+                    except Exception as exc:
+                        self.get_logger().warning(f"Error processing YOLO detection box: {exc}")
+
+            # Merge detections within 30px distance, keeping highest confidence
+            merged_detections = TTARotation.merge_detections(candidates, distance_threshold=30.0)
+
+            for det in merged_detections:
+                x1 = det.cx - det.width * 0.5
+                y1 = det.cy - det.height * 0.5
+                x2 = det.cx + det.width * 0.5
+                y2 = det.cy + det.height * 0.5
+
+                self._publish_survivor_detection(
+                    frame=frame,
+                    image_stamp=frame_stamp,
+                    confidence=det.confidence,
+                    x1=x1,
+                    y1=y1,
+                    x2=x2,
+                    y2=y2,
+                    center_u=det.cx,
+                    center_v=det.cy,
+                )
 
     def _publish_survivor_detection(
         self,
@@ -541,6 +610,8 @@ class PerceptionNode(Node):
         y1: float,
         x2: float,
         y2: float,
+        center_u: Optional[float] = None,
+        center_v: Optional[float] = None,
     ):
         """
         Construct and publish SurvivorDetection message.
@@ -556,8 +627,10 @@ class PerceptionNode(Node):
 
         bbox_w = x2_c - x1_c
         bbox_h = y2_c - y1_c
-        center_u = (x1_c + x2_c) * 0.5
-        center_v = (y1_c + y2_c) * 0.5
+        if center_u is None:
+            center_u = (x1_c + x2_c) * 0.5
+        if center_v is None:
+            center_v = (y1_c + y2_c) * 0.5
 
         # Save detection crop
         self.detection_counter += 1
@@ -621,7 +694,7 @@ class PerceptionNode(Node):
         if (
             altitude is None
             or altitude_stamp is None
-            or not (0.0 <= image_stamp - altitude_stamp <= 0.5)
+            or abs(image_stamp - altitude_stamp) > 0.5
             or altitude <= 0.0
             or not math.isfinite(altitude)
         ):

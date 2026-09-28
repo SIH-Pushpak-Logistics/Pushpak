@@ -13,11 +13,16 @@ import math
 import numpy as np
 import pytest
 
+import cv2
+
 from navigation_brain.perception_core import (
     CameraIntrinsics,
     CovarianceRamp,
+    DEFAULT_TTA_ANGLES,
     ImageQualityEvaluator,
     OpticalFlowTracker,
+    TTADetection,
+    TTARotation,
     WorldProjector,
 )
 
@@ -394,3 +399,154 @@ class TestOpticalFlowTracker:
         assert math.isclose(pt320[0], 5.0, abs_tol=1e-4)
         assert math.isclose(pt320[1], 5.0, abs_tol=1e-4)
         assert math.isclose(pt320[2], 0.0, abs_tol=1e-4)
+
+
+class TestTTARotation:
+    """
+    Unit tests for Rotation Test-Time Augmentation (TTA) algorithms.
+    """
+
+    def test_all_24_rotation_angles_inversion(self):
+        """
+        TEST A: For all 24 angles (0, 15, ..., 345 deg), rotate a known point
+        using the affine transform and recover it via invertAffineTransform.
+        Assert that the recovered point matches the original point within tolerance.
+        """
+        s = 500
+        center = (s / 2.0, s / 2.0)
+        orig_pt = np.array([180.0, 220.0])
+
+        assert len(DEFAULT_TTA_ANGLES) == 24
+        for angle in DEFAULT_TTA_ANGLES:
+            M = cv2.getRotationMatrix2D(center, float(angle), 1.0)
+            pt_rot = M @ np.array([orig_pt[0], orig_pt[1], 1.0])
+
+            M_inv = cv2.invertAffineTransform(M)
+            pt_recovered = M_inv @ np.array([pt_rot[0], pt_rot[1], 1.0])
+
+            assert math.isclose(pt_recovered[0], orig_pt[0], abs_tol=1e-3), f"Failed X on angle {angle}"
+            assert math.isclose(pt_recovered[1], orig_pt[1], abs_tol=1e-3), f"Failed Y on angle {angle}"
+
+    def test_padding_rejection_for_outside_mapped_centres(self):
+        """
+        TEST B: Create a detection centre that maps into the padding region
+        or outside the original image. Verify it is rejected by is_point_inside_image.
+        """
+        w, h = 320, 240
+        s, offset_x, offset_y = TTARotation.compute_square_padding(w, h)
+
+        # 1. Point in square image placed inside top-left padding margin
+        pt_in_padding = (offset_x - 10.0, offset_y + 50.0)
+        M_identity = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+        orig_x, orig_y = TTARotation.map_rotated_point_to_original(
+            pt_in_padding[0], pt_in_padding[1], M_identity, offset_x, offset_y
+        )
+        assert orig_x < 0.0
+        assert not TTARotation.is_point_inside_image(orig_x, orig_y, w, h)
+
+        # 2. Point with rotation landing outside original image
+        center = (s / 2.0, s / 2.0)
+        M_rot = cv2.getRotationMatrix2D(center, 45.0, 1.0)
+        # Point near edge of square image
+        rot_corner = (10.0, 10.0)
+        orig_rx, orig_ry = TTARotation.map_rotated_point_to_original(
+            rot_corner[0], rot_corner[1], M_rot, offset_x, offset_y
+        )
+        assert not TTARotation.is_point_inside_image(orig_rx, orig_ry, w, h)
+
+        # 3. Valid point inside original image is accepted
+        pt_valid = (offset_x + 100.0, offset_y + 100.0)
+        orig_vx, orig_vy = TTARotation.map_rotated_point_to_original(
+            pt_valid[0], pt_valid[1], M_identity, offset_x, offset_y
+        )
+        assert TTARotation.is_point_inside_image(orig_vx, orig_vy, w, h)
+
+    def test_merge_detections_less_than_30px_keeps_highest_confidence(self):
+        """
+        TEST C1: Two detections with distance < 30px produce one merged detection
+        with the highest confidence surviving.
+        """
+        d1 = TTADetection(cx=100.0, cy=100.0, width=40.0, height=40.0, confidence=0.88)
+        # Distance = hypot(115 - 100, 110 - 100) = hypot(15, 10) = 18.03 < 30 px
+        d2 = TTADetection(cx=115.0, cy=110.0, width=42.0, height=42.0, confidence=0.45)
+
+        merged = TTARotation.merge_detections([d2, d1], distance_threshold=30.0)
+        assert len(merged) == 1
+        assert merged[0].confidence == 0.88
+        assert math.isclose(merged[0].cx, 100.0)
+        assert math.isclose(merged[0].cy, 100.0)
+
+    def test_merge_detections_greater_than_or_equal_30px_remain_separate(self):
+        """
+        TEST C2: Two detections with distance >= 30px remain separate.
+        """
+        d1 = TTADetection(cx=100.0, cy=100.0, width=40.0, height=40.0, confidence=0.88)
+        # Distance = hypot(135 - 100, 100 - 100) = 35.0 >= 30 px
+        d2 = TTADetection(cx=135.0, cy=100.0, width=40.0, height=40.0, confidence=0.75)
+
+        merged = TTARotation.merge_detections([d1, d2], distance_threshold=30.0)
+        assert len(merged) == 2
+        confs = {m.confidence for m in merged}
+        assert confs == {0.88, 0.75}
+
+    def test_mapped_back_centre_used_for_world_projection(self):
+        """
+        TEST D: Verify that the final mapped-back centre (and not the rotated coordinate)
+        is the point used to compute 3D world position in odom.
+        """
+        w, h = 320, 240
+        s, offset_x, offset_y = TTARotation.compute_square_padding(w, h)
+        center = (s / 2.0, s / 2.0)
+        intrinsics = CameraIntrinsics(fx=200.0, fy=200.0, cx=160.0, cy=120.0, width=w, height=h)
+
+        # Original target at optical center (160, 120)
+        sq_orig_x = offset_x + 160.0
+        sq_orig_y = offset_y + 120.0
+
+        # Rotate by 90 degrees
+        angle = 90.0
+        M = cv2.getRotationMatrix2D(center, angle, 1.0)
+        rot_pt = M @ np.array([sq_orig_x, sq_orig_y, 1.0])
+
+        # Map back
+        mapped_x, mapped_y = TTARotation.map_rotated_point_to_original(
+            rot_pt[0], rot_pt[1], M, offset_x, offset_y
+        )
+        assert math.isclose(mapped_x, 160.0, abs_tol=1e-3)
+        assert math.isclose(mapped_y, 120.0, abs_tol=1e-3)
+
+        # World projection using mapped centre at optical center: nadir under drone
+        pt_mapped = WorldProjector.project_bbox_to_world(
+            center_u=mapped_x,
+            center_v=mapped_y,
+            altitude=2.0,
+            intrinsics=intrinsics,
+            drone_x=5.0,
+            drone_y=5.0,
+            drone_z=2.0,
+            drone_qx=0.0,
+            drone_qy=0.0,
+            drone_qz=0.0,
+            drone_qw=1.0,
+        )
+        assert pt_mapped is not None
+        # At optical center, nadir ground position matches drone (5.0, 5.0, 0.0)
+        assert math.isclose(pt_mapped[0], 5.0, abs_tol=1e-3)
+        assert math.isclose(pt_mapped[1], 5.0, abs_tol=1e-3)
+        assert math.isclose(pt_mapped[2], 0.0, abs_tol=1e-3)
+
+        # Unmapped rotated point would yield a completely wrong position
+        pt_unmapped = WorldProjector.project_bbox_to_world(
+            center_u=rot_pt[0],
+            center_v=rot_pt[1],
+            altitude=2.0,
+            intrinsics=intrinsics,
+            drone_x=5.0,
+            drone_y=5.0,
+            drone_z=2.0,
+            drone_qx=0.0,
+            drone_qy=0.0,
+            drone_qz=0.0,
+            drone_qw=1.0,
+        )
+        assert not math.isclose(pt_unmapped[0], 5.0, abs_tol=0.1) or not math.isclose(pt_unmapped[1], 5.0, abs_tol=0.1)
