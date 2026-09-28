@@ -19,3 +19,14 @@ pushpak_brain:
     backtrack_cov_threshold: 0.2
     backtrack_speed_mps: 1.0
     backtrack_accept_radius_m: 0.4
+
+pushpak_telemetry:
+  ros__parameters:
+    keyframe_rate_hz: 5.0
+    heartbeat_rate_hz: 2.0
+    peers_alive_rate_hz: 10.0
+    peer_timeout_s: 1.75
+    survivor_dedup_radius_m: 1.5
+    zenoh_listen: "tcp/0.0.0.0:7447"
+    zenoh_connect: ""
+    proto_path: "/workspace/proto/pushpak.proto"

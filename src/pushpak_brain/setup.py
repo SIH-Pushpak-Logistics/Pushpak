@@ -19,6 +19,7 @@ setup(
     entry_points={
         'console_scripts': [
             'pushpak_brain = pushpak_brain.brain_node:main',
+            'pushpak_telemetry = pushpak_brain.telemetry_node:main',
         ],
     },
 )

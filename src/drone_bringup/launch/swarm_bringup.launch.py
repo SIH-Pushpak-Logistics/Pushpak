@@ -27,6 +27,8 @@ def generate_launch_description():
                output='screen', parameters=[ekf_config, {'use_sim_time': use_sim_time}])
     brain = Node(package='pushpak_brain', executable='pushpak_brain', name='pushpak_brain',
                  output='screen', parameters=[pushpak_params, common])
+    telemetry = Node(package='pushpak_brain', executable='pushpak_telemetry', name='pushpak_telemetry',
+                     output='screen', parameters=[pushpak_params, common])
     handshake = Node(package='navigation_brain', executable='arm_takeoff_handshake',
                      name='arm_takeoff_handshake', output='screen',
                      parameters=[{'use_sim_time': use_sim_time}],
@@ -38,5 +40,6 @@ def generate_launch_description():
         DeclareLaunchArgument('auto_takeoff', default_value='false'),
         ekf,
         brain,
+        telemetry,
         handshake,
     ] + onboard_nodes)
