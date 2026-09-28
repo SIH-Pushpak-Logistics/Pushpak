@@ -83,7 +83,8 @@ EMULATION / PERCEPTION
   perception_node
     Pipeline A  Lucas-Kanade + gyro de-rotation + pinhole(camera_info, ToF)
                 -> /visual/velocity   (R ramps 0.05 -> 1e6 under dust)
-    Pipeline B  YOLOv8n, conf >= 0.85, 2 Hz
+                PARKED until after 30 Sep: the demo runs visual-absent (§16)
+    Pipeline B  YOLOv8n + rotation TTA (15° steps), conf >= 0.4, 2 Hz
                 -> /detections/survivor
  v
 ESTIMATION
@@ -100,14 +101,17 @@ GUIDANCE
                              then stays alive as FS-4 watchdog
   # Note: Camera points strictly downward (rpy 0 1.570796 0); odom z is height above ground by definition.
   pushpak_brain (Python) @20Hz, starts on /pushpak/airborne == true
-    keyframe FIFO (5 Hz sample, 200 poses)
     exploration waypoint list -> P follower -> clamps -> failsafes
-    survivor dedup (1.5 m radius)
+    FS-2 from /pushpak/peers_alive
+    keyframe FIFO for FS-3 backtracking (stretch, §10)
     -> /mavros/setpoint_velocity/cmd_vel      SINGLE WRITER
-    -> zenoh: keyframe / survivor / heartbeat
+  telemetry adapter   the vehicle's only Zenoh session, drone_id = vehicle id
+    /odometry/filtered, /detections/survivor -> zenoh keyframe / survivor / heartbeat
+    survivor dedup (1.5 m radius)
+    Zenoh peer liveness -> /pushpak/peers_alive
  v
 TELEMETRY (peer-to-peer, no router)
-  pushpak_brain <-> pushpak_peer / HITL rig <-> zenoh_gateway.py
+  telemetry adapter <-> pushpak_peer / HITL rig <-> zenoh_gateway.py (peer 0)
   zenoh_gateway.py -> ws://<host>:8765 -> React dashboard
 ```
 
@@ -189,9 +193,11 @@ altitude as a Z-only pose for that reason.
 |---|---|---|---|
 | `model_path` | string | `/workspace/yolov8n.pt` | `.pt` or a TensorRT `.engine`. Engines are built on the target device. |
 | `device` | string | `cuda:0` | `cpu` allowed for bench tests |
-| `imgsz` | int | 320 | |
-| `conf_threshold` | double | 0.85 | |
+| `imgsz` | int | 416 | Rotated frames are padded to a 400 px square |
+| `conf_threshold` | double | 0.4 | Provisional until the bare-ground false-positive run (§16). 0.85 was unreachable: the clean source decals score 0.68–0.79 |
 | `max_rate_hz` | double | 2.0 | Pipeline B only |
+| `tta_angles_deg` | double[] | 0, 15, …, 345 | Rotation test-time augmentation in one batched predict; box centres mapped back through the inverse rotation (§15 item 8) |
+| `enable_visual_velocity` | bool | false in the demo | Launch-time only, never switched at runtime (I-6). false: Pipeline A off, `/visual/velocity` not published, which is the configuration the §17 gate measured |
 
 ### Guidance and actuation
 | Topic | Type | Producer |
@@ -200,6 +206,7 @@ altitude as a Z-only pose for that reason.
 | `/mavros/vision_pose/pose` | `geometry_msgs/PoseStamped` | `vio_bridge_node` |
 | `/mavros/vision_speed/speed_twist_cov` | `geometry_msgs/TwistWithCovarianceStamped` | `vio_bridge_node` |
 | `/mavros/setpoint_velocity/cmd_vel` | `geometry_msgs/TwistStamped` | `pushpak_brain` **only** |
+| `/pushpak/peers_alive` | `std_msgs/UInt32MultiArray` (ids of peers heard in the last 1.75 s), 10 Hz | telemetry adapter; consumed by `pushpak_brain` for FS-2 |
 
 ArduPilot `GUID_TIMEOUT` (3 s): if `cmd_vel` stops, the vehicle brakes and drifts.
 It does not hold position. FS-4 covers this.
@@ -295,7 +302,9 @@ message Heartbeat {
 Measured serialized sizes (round-trip verified): `SubMapKeyframe` 29 B typical,
 35 B at operational extremes, and up to 54 B at unrestricted `int32` extremes;
 `SurvivorEvent` ≤ 29 B and `Heartbeat` ≤ 11 B. These are protobuf payload sizes,
-excluding Zenoh/TCP framing overhead.
+excluding Zenoh/TCP framing overhead. "Operational extremes" means |roll|, |pitch| ≤ 18000 cdeg
+and |yaw| ≤ 36000 cdeg: within those a keyframe is ≤ 50 B at any position
+(`operational_extremes_fit_50_bytes`).
 Proto3 has no 16-bit integer type; `sint32` with zigzag encoding costs the same bytes
 for centidegree values.
 
@@ -328,8 +337,13 @@ keeps working. `drone_id` becomes the string `drone_%02d`.
 
 `rssi_dbm` is `null` because nothing measures it. v0.1 fabricated RSSI; that stops.
 `velocity` and `flow_debug` are no longer transmitted.
-Allowed `dashboard/src/` edits: `LinkStatus.rssi_dbm` becomes `number | null`, and one new
-`EkfHealthPanel.tsx`.
+`zenoh_gateway.py` is Zenoh peer `0`: it publishes its own heartbeat, so stopping it is a real
+ground-station loss. `--pose-drone-id` selects the one drone whose keyframes produce `pose`,
+`altitude` and `ekf_health`, so other peers never draw on the track.
+Dashboard edits made 28 Sep (#34): `LinkStatus.timestamp`, `last_sync_sec` and `rssi_dbm` are
+nullable (RSSI shows "not measured"); velocity/flow_debug removed; the header shows the live
+drone id; Redis leftovers deleted. `EkfHealthPanel.tsx` is deferred: no producer sets
+`status_flags` bits 0, 1, 3 or 4 yet, so it would show the radar as off while it works (§16).
 
 ---
 
@@ -341,11 +355,17 @@ Evaluated in `pushpak_brain` at 20 Hz in this priority order. First match wins.
 |---|---|---|---|
 | 1 | **FS-5 FCU rejection** | MAVROS mode ≠ GUIDED, or disarmed, while airborne | Stop publishing, log, never fight the FCU. |
 | 2 | **FS-3 Topological backtrack** | Visual covariance ≥ 1e6 **and** `Tr(Σ_v)` of `/odometry/filtered` > `backtrack_cov_threshold` (Note: Dust alone cannot trigger FS-3; radar loss is an injected fault via `/sim/fault/radar`) | Abort exploration. Reverse the keyframe FIFO at ≤ 1.0 m/s, acceptance sphere 0.4 m, until the visual baseline returns or any peer is heard. |
-| 3 | **FS-2 Isolated** | No heartbeat from **any** other peer, ground station included, for > 2.0 s | Halt exploration and hold (zero velocity). Set bit 4. |
+| 3 | **FS-2 Isolated** | No heartbeat from **any** other peer, ground station included, for > 2.0 s. In `pushpak_brain`: `/pushpak/peers_alive` never heard, older than `isolation_timeout_s`, or empty | Halt exploration and hold (zero velocity); resume at the same waypoint when a peer returns. Bit 4 once the brain's flags reach telemetry (§16). |
 | 4 | **FS-1 Visual dropout** | Visual covariance ≥ 1e6 | Continue on radar-inertial. Clear bit 0. |
 | — | **FS-4 Guidance liveness** | `arm_takeoff_handshake.py` sees no `cmd_vel` for > 1.0 s after airborne | Sidecar commands `SetMode LAND`. Lives outside `pushpak_brain` because it covers `pushpak_brain` dying. |
 
-`backtrack_cov_threshold`: **OPEN — owner Ashutosh**, derived from hover-gate data.
+`backtrack_cov_threshold` = 0.2, derived from hover-gate data (§17).
+
+**Implemented as of 28 Sep:** FS-5, FS-2 (#35) and FS-4. **FS-3 is a stretch goal** and is not
+in the demo unless it passes its own gate. Its end condition as written is contradictory: with
+any peer alive, "until any peer is heard" ends backtracking the moment it starts. If built, it
+ends when `Tr(Σ_v)` falls back under the threshold or the FIFO is exhausted. **FS-1** has no
+effect while Pipeline A is parked.
 
 ---
 
@@ -393,7 +413,8 @@ threshold itself. `RNGFND1_MAX_CM 400` matches a VL53L1X-class ToF; the Gazebo l
 | `src/navigation_brain/.../altimeter_node.py`, `sim_radar_emulator_node.py`, `vio_bridge_node.py`, `config/ekf_15state.yaml`, `src/navigation_brain/navigation_brain/arm_takeoff_handshake.py`, `src/pushpak_brain/`, `firmware/` | Ashutosh |
 | `src/navigation_brain/.../perception_node.py` | Raunak |
 | `proto/pushpak.proto` (frozen), `src/pushpak_telemetry/`, `src/pushpak_peer/`, `hitl/` | Kanishk |
-| `src/drone_description/worlds/collapse.sdf`, `meshes/collapse/`, `tools/zenoh_gateway.py`, `dashboard/` | Aditya |
+| `tools/zenoh_gateway.py`, `dashboard/` | Ashutosh (taken over 28 Sep when the 12:00 gateway tripwire fired) |
+| `src/drone_description/materials/victim_*.png` | Aditya |
 | `src/drone_interfaces/` | Frozen contract. Changes need team announcement. |
 
 ---
@@ -468,6 +489,14 @@ State these before judges find them.
    Nano, USB camera, an unarmed ArduPilot FC as IMU, and optionally an IWR6843 radar. Drone B
    is a design target: estimated 600–760 g all-up and 5–7 minutes' endurance. Sub-GHz HaLow
    is a design target; the rig uses a standard Wi-Fi router. Tested 26 Sep: an Android hotspot and campus Wi-Fi both block device-to-device traffic (client isolation), and the two-laptop Zenoh test passed only on a laptop-hosted access point. The demo brings its own network and checks it with a two-machine ping before any Zenoh run.
+8. **The detector is COCO-pretrained YOLOv8n, not an aerial model.** Top-down people are detected
+   only when they appear upright in the image: in simulation `victim_03` scored 0.83 at yaw 0 and
+   nothing at five other yaws. Rotation test-time augmentation in 15° steps recovered every tested
+   orientation (10 in-flight frames, 0.42–0.91). Validated on three synthetic decals only; false
+   positives over rubble or bare ground are untested (§16). An aerial-trained model is future work.
+9. **Drift during the search pattern, measured 28 Sep** (radar bias 0, 72 s of the lawnmower, bag
+   `phase4_lawnmower_2026-09-28`): estimate-vs-truth error max 0.51 m, mean 0.30 m. Survivor
+   positions on the dashboard carry this error.
 
 ---
 
@@ -475,7 +504,10 @@ State these before judges find them.
 
 | Item | Owner | Due |
 |---|---|---|
-| Laplacian-variance dust threshold | Raunak | Day 3 |
+| Pipeline A (optical flow, Laplacian dust metric) parked: not shipped before 30 Sep; the demo runs visual-absent, the gated configuration. Verify the roll de-rotation sign before it ships | Raunak | after 30 Sep |
+| Bare-ground false-positive check for YOLO + TTA at `conf_threshold` 0.4 | Ashutosh | before any recording |
+| `victim_02` decal scores only 0.42 with TTA; replace it with a higher-resolution top-down image | Aditya | 28 Sep |
+| `ekf_health` is transmitted but no producer sets `status_flags` bits 0, 1, 3 or 4; add `EkfHealthPanel.tsx` once one does | Ashutosh | after the demo path works |
 | Hardware inventory and rig tier (1/2/3) | Kanishk | Day 1, **overdue** |
 | HaLow channel-plan legality in India (design target) | Kanishk | before the deck freezes |
 | Pin rustc 1.98.1 in `Dockerfile`; delete build dirs in the same layer to shrink the image | Ashutosh | next Dockerfile change |
@@ -491,7 +523,7 @@ A tripwire is decided in advance and executed without debate when its deadline p
 | T-2 | Jetson not physically present | **fired 27 Sep** | No Jetson. The desk rig runs on Kanishk's laptop instead (T-6). `pushpak_peer` on a second laptop still proves decentralization. |
 | T-3 | TI radar not streaming a point cloud on the Jetson | 24 h after the Jetson is first powered | Radar leaves the rig: camera + YOLO + Zenoh, FC as IMU. No hardware is ordered. |
 | T-4 | `rclrs` not building in the container | fired Day 2 (§1) | `pushpak_brain` is Python. |
-| T-5 | `collapse.sdf` not merged | Day 6 | Demo runs in `swarm.sdf`; S-5 stays, and the deck says so. |
+| T-5 | `collapse.sdf` not merged | Day 6, **fired** | Demo runs in `swarm.sdf`; S-5 stays, and the deck says so. |
 | T-6 | Desk rig (laptop + ArduPilot FC as IMU + USB camera, `perception_node` live) not producing real detections on the dashboard | end of 29 Sep | Submit without rig footage; hardware is described as a design target only. |
 
 Only one `pushpak_brain` implementation is ever launched (I-3).
@@ -560,3 +592,20 @@ linear because the unobserved acceleration states feed velocity (accelerations a
 Derived with Q = robot_localization's shipped default diagonal
 [0.05, 0.05, 0.06, 0.03, 0.03, 0.06, 0.025, 0.025, 0.04, 0.01, 0.01, 0.02, 0.01, 0.01, 0.015];
 changing Q or the fusion matrix invalidates it.
+
+---
+
+## 18. Phase 4 Evidence (28 Sep)
+
+- **Exploration** (#32): lawnmower over x, y ∈ [−3, 3] m, 1.5 m lanes, kp 0.8, v_max 0.7 m/s
+  (`pushpak_params.yaml`). SITL, radar bias 0: 10/10 waypoints in 62.3 s (kinematic prediction
+  60.3 s); all three victims passed under the camera footprint; drift in §15 item 9.
+- **FS-2** (#35): held with no liveness topic (truth moved 0.03 m in 10 s); explored once peer 0
+  was alive; isolated about 2.0 s after the liveness publisher stopped (0.13 m in 6 s of hold);
+  resumed at the same waypoint; isolated immediately on an empty peer list.
+- **FS-4**: killing `pushpak_brain` after a 53 s hover commanded LAND in 1.05 s; disarmed 5.1 s
+  later (§16).
+- **Gateway** (#33) against the Rust `pushpak_peer`: every §9 type delivered; ONLINE to OFFLINE
+  about 2 s after the peer stopped; oversize and id-mismatch payloads rejected; the Rust peer
+  decoded the gateway's heartbeat.
+- In every flight run `pushpak_brain` was the only `cmd_vel` publisher (I-3).
