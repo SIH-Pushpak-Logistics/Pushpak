@@ -293,11 +293,22 @@ message Heartbeat {
 ```
 
 Measured serialized sizes (round-trip verified): `SubMapKeyframe` 29 B typical,
-35 B worst case · `SurvivorEvent` ≤ 29 B · `Heartbeat` ≤ 11 B. All under 50 B.
+35 B at operational extremes, and up to 54 B at unrestricted `int32` extremes;
+`SurvivorEvent` ≤ 29 B and `Heartbeat` ≤ 11 B. These are protobuf payload sizes,
+excluding Zenoh/TCP framing overhead.
 Proto3 has no 16-bit integer type; `sint32` with zigzag encoding costs the same bytes
 for centidegree values.
 
 **Version pin: 1.0.0**, identical in the Dockerfile (`ZENOH_VERSION`), the Python `eclipse-zenoh==1.0.0` package and the Rust crate (`zenoh = "=1.0.0"`).
+
+Wire validation contract: reject protobuf payloads over 50 B and messages whose
+`drone_id` disagrees with the session or topic key. Every Rust and Python peer,
+including the gateway, must apply these same rules before accepting a message.
+
+Build and run the routerless peer with `--locked` as described in the
+[two-laptop acceptance test](docs/ZENOH_TWO_LAPTOP_TEST.md). The
+[Rust-to-Python heartbeat check](docs/RUST_PYTHON_HEARTBEAT_CHECK.md) verifies
+cross-language decoding; both tests run without `zenohd`.
 
 ---
 
