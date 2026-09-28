@@ -9,6 +9,8 @@ interface Props {
 export const LinkStatusPanel: React.FC<Props> = ({ state }) => {
   const { linkStatus } = state;
   const statusType = linkStatus?.state || 'OFFLINE';
+  const rssi = linkStatus?.rssi_dbm;
+  const lastSync = linkStatus?.last_sync_sec;
 
   return (
     <div className="panel">
@@ -26,7 +28,7 @@ export const LinkStatusPanel: React.FC<Props> = ({ state }) => {
         <div className="metric-item">
           <div className="metric-label">RSSI</div>
           <div className="metric-value mono">
-            {linkStatus ? linkStatus.rssi_dbm.toFixed(1) : '--'} dBm
+            {typeof rssi === 'number' ? `${rssi.toFixed(1)} dBm` : 'not measured'}
           </div>
         </div>
         <div className="metric-item">
@@ -36,9 +38,9 @@ export const LinkStatusPanel: React.FC<Props> = ({ state }) => {
           </div>
         </div>
         <div className="metric-item" style={{ gridColumn: '1 / -1' }}>
-          <div className="metric-label">Last Sync</div>
+          <div className="metric-label">Last Heartbeat</div>
           <div className="metric-value mono" style={{ fontSize: '1rem' }}>
-            {linkStatus ? `${linkStatus.last_sync_sec.toFixed(2)}s` : '--'}
+            {typeof lastSync === 'number' ? `${lastSync.toFixed(2)}s ago` : '--'}
           </div>
         </div>
       </div>

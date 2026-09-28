@@ -21,7 +21,7 @@ export default function App() {
             {state.connected ? 'DATA LINK CONNECTED' : 'DATA LINK OFFLINE'}
           </div>
           <div className="status-badge" style={{ background: 'transparent', border: 'none', padding: 0 }}>
-            DRONE-00
+            {state.pose ? state.pose.drone_id.toUpperCase().replace('_', '-') : 'NO DRONE'}
           </div>
         </div>
       </header>

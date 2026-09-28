@@ -1,12 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { type DashboardState, type DronePose, type DroneAltitude, type DroneVelocity, type DroneFlowDebug, type LinkStatus, type Victim } from '../types';
+import { type DashboardState, type DronePose, type DroneAltitude, type LinkStatus, type Victim } from '../types';
 
 export function useTelemetry(wsUrl: string) {
     const [state, setState] = useState<DashboardState>({
         pose: null,
         altitude: null,
-        velocity: null,
-        flowDebug: null,
         linkStatus: null,
         victims: [],
         track: [],
@@ -35,16 +33,11 @@ export function useTelemetry(wsUrl: string) {
                         const newState = { ...prev };
                         if (type === 'pose') {
                             newState.pose = data as DronePose;
-                            // Add to track (max 500 points)
                             const track = [...prev.track, newState.pose];
                             if (track.length > 500) track.shift();
                             newState.track = track;
                         } else if (type === 'altitude') {
                             newState.altitude = data as DroneAltitude;
-                        } else if (type === 'velocity') {
-                            newState.velocity = data as DroneVelocity;
-                        } else if (type === 'flow_debug') {
-                            newState.flowDebug = data as DroneFlowDebug;
                         } else if (type === 'status') {
                             newState.linkStatus = data as LinkStatus;
                         } else if (type === 'victims') {
