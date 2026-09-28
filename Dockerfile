@@ -136,6 +136,7 @@ RUN pip3 install --no-cache-dir \
     ultralytics==8.4.155 \
     protobuf==3.20.3 \
     eclipse-zenoh==${ZENOH_VERSION} \
+    websockets==12.0 \
     'numpy<2'
 
 # 13 setuptools must be apt 59.6.0
