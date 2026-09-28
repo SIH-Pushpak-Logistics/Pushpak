@@ -8,9 +8,10 @@ from rclpy.time import Time
 from geometry_msgs.msg import TwistStamped
 from mavros_msgs.msg import State
 from nav_msgs.msg import Odometry
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, UInt32MultiArray
 
 from pushpak_brain.exploration import guidance_step, lawnmower, path_length, validate_gains
+from pushpak_brain.failsafe import isolation_state
 
 NAN = float('nan')
 
@@ -37,7 +38,8 @@ PARAMS = [
     ('backtrack_accept_radius_m', 0.4),
 ]
 
-REQUIRED_POSITIVE = ('explore_lane_spacing_m', 'explore_accept_radius_m', 'odom_max_age_s')
+REQUIRED_POSITIVE = ('explore_lane_spacing_m', 'explore_accept_radius_m', 'odom_max_age_s',
+                     'isolation_timeout_s')
 
 
 class PushpakBrain(Node):
@@ -61,6 +63,7 @@ class PushpakBrain(Node):
         self.accept_radius = p['explore_accept_radius_m']
         self.start_delay = p['explore_start_delay_s']
         self.odom_max_age = p['odom_max_age_s']
+        self.isolation_timeout = p['isolation_timeout_s']
         self.waypoints = lawnmower(p['explore_x_min_m'], p['explore_x_max_m'],
                                    p['explore_y_min_m'], p['explore_y_max_m'],
                                    p['explore_lane_spacing_m'])
@@ -78,9 +81,13 @@ class PushpakBrain(Node):
         self.odom = None
         self.index = 0
         self.status = None
+        self.peers = []
+        self.peers_t = None
+        self.isolated = None
         self.create_subscription(Bool, '/pushpak/airborne', self.airborne_cb, latched)
         self.create_subscription(State, '/mavros/state', self.state_cb, 10)
         self.create_subscription(Odometry, '/odometry/filtered', self.odom_cb, 10)
+        self.create_subscription(UInt32MultiArray, '/pushpak/peers_alive', self.peers_cb, 10)
         self.cmd_pub = self.create_publisher(TwistStamped, '/mavros/setpoint_velocity/cmd_vel', 10)
         self.create_timer(1.0 / self.rate_hz, self.tick)
 
@@ -100,6 +107,10 @@ class PushpakBrain(Node):
     def odom_cb(self, msg):
         self.odom = msg
 
+    def peers_cb(self, msg):
+        self.peers = list(msg.data)
+        self.peers_t = self.now_s()
+
     def tick(self):
         if not self.airborne or self.released:
             return
@@ -111,6 +122,17 @@ class PushpakBrain(Node):
                 f'FS-5: FCU mode={mode} armed={armed} while airborne; setpoints stopped, not fighting the FCU')
             return
         now = self.now_s()
+        peers_age = None if self.peers_t is None else now - self.peers_t
+        isolated, why = isolation_state(peers_age, self.peers, self.isolation_timeout)
+        if isolated != self.isolated:
+            if isolated:
+                self.get_logger().error(f'FS-2: isolated ({why}); holding zero velocity')
+            else:
+                self.get_logger().info(f'FS-2 cleared: peers alive {self.peers}; guidance resumes')
+        self.isolated = isolated
+        if isolated:
+            self.publish_velocity(0.0, 0.0)
+            return
         pos, age = None, None
         if self.odom is not None:
             pos = (self.odom.pose.pose.position.x, self.odom.pose.pose.position.y)
@@ -124,6 +146,9 @@ class PushpakBrain(Node):
             self.get_logger().info(
                 f'guidance: {status} waypoint {index}/{len(self.waypoints)} est {where} odom_age {age_txt} s')
         self.status, self.index = status, index
+        self.publish_velocity(vx, vy)
+
+    def publish_velocity(self, vx, vy):
         msg = TwistStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = 'odom'
