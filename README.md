@@ -196,8 +196,10 @@ altitude as a Z-only pose for that reason.
 | `imgsz` | int | 416 | Rotated frames are padded to a 400 px square |
 | `conf_threshold` | double | 0.4 | Provisional until the bare-ground false-positive run (§16). 0.85 was unreachable: the clean source decals score 0.68–0.79 |
 | `max_rate_hz` | double | 2.0 | Pipeline B only |
-| `tta_angles_deg` | double[] | 0, 15, …, 345 | Rotation test-time augmentation in one batched predict; box centres mapped back through the inverse rotation (§15 item 8) |
+| `tta_angles_deg` | integer[] | 0, 15, …, 345 | Rotation test-time augmentation in one batched predict; box centres mapped back through the inverse rotation (§15 item 8) |
 | `enable_visual_velocity` | bool | false in the demo | Launch-time only, never switched at runtime (I-6). false: Pipeline A off, `/visual/velocity` not published, which is the configuration the §17 gate measured |
+
+Values live in `pushpak_params.yaml` under `perception_node`. ROS 2 Humble fixes each parameter's type from the code default, so a value of another type stops the node at startup: write `2.0`, not `2`, for a double, and integers for `tta_angles_deg`.
 
 ### Guidance and actuation
 | Topic | Type | Producer |

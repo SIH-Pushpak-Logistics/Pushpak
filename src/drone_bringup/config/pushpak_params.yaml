@@ -30,3 +30,15 @@ pushpak_telemetry:
     zenoh_listen: "tcp/0.0.0.0:7447"
     zenoh_connect: ""
     proto_path: "/workspace/proto/pushpak.proto"
+
+perception_node:
+  ros__parameters:
+    enable_visual_velocity: false
+    model_path: "/workspace/yolov8n.pt"
+    device: "cuda:0"
+    imgsz: 416
+    conf_threshold: 0.4
+    max_rate_hz: 2.0
+    odom_staleness_sec: 0.5
+    tta_angles_deg: [0, 15, 30, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180, 195, 210, 225, 240, 255, 270, 285, 300, 315, 330, 345]
+    detection_dir: "/workspace/detections"

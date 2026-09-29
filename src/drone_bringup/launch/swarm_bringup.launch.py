@@ -29,6 +29,8 @@ def generate_launch_description():
                  output='screen', parameters=[pushpak_params, common])
     telemetry = Node(package='pushpak_brain', executable='pushpak_telemetry', name='pushpak_telemetry',
                      output='screen', parameters=[pushpak_params, common])
+    perception = Node(package='navigation_brain', executable='perception_node', name='perception_node',
+                      output='screen', parameters=[pushpak_params, common])
     handshake = Node(package='navigation_brain', executable='arm_takeoff_handshake',
                      name='arm_takeoff_handshake', output='screen',
                      parameters=[{'use_sim_time': use_sim_time}],
@@ -41,5 +43,6 @@ def generate_launch_description():
         ekf,
         brain,
         telemetry,
+        perception,
         handshake,
     ] + onboard_nodes)
