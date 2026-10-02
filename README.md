@@ -117,19 +117,18 @@ docker exec -it swarm_brain_container bash
 source /opt/ros/humble/setup.bash && source /bridge_ws/install/setup.bash
 cd /workspace && colcon build --symlink-install && source install/setup.bash
 
-# container, terminal 1: Gazebo server + ArduPilot SITL + MAVROS (retries past a known gz sensor race)
-./launch_sim.sh
-
-# container, terminal 2: estimator, brain, perception, telemetry, takeoff handshake
-ros2 launch drone_bringup swarm_bringup.launch.py drone_id:=1 use_sim_time:=true auto_takeoff:=true
-
-# container, terminal 3: command-post gateway (Zenoh peer 0 -> WebSocket 8765)
+# container, terminal 1: command-post gateway (Zenoh peer 0 -> WebSocket 8765); restart it for every flight
 python3 tools/zenoh_gateway.py --pose-drone-id 1
 
-# host: dashboard on http://localhost:5173
+# host: dashboard on http://localhost:5173 (open a new tab for every flight)
 cd dashboard && npm install && npm run dev
 
-# optional, Gazebo GUI: `xhost +local:root` on the host, then `gz sim -g` in the container
+# container, terminal 2: the whole stack in one launch (Gazebo server, ArduPilot SITL, MAVROS, estimator,
+# brain, perception, telemetry, takeoff handshake). Never launch swarm_bringup.launch.py as well
+./launch_sim.sh drone_id:=1 auto_takeoff:=true
+
+# optional, Gazebo GUI: on the host run `xhost +local:root`, then
+# `docker exec -it -e DISPLAY=$DISPLAY swarm_brain_container gz sim -g`
 ```
 
 The model weights (`/workspace/yolov8n.pt`) and rosbags are kept out of git (§14). Tests:
