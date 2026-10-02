@@ -1,16 +1,188 @@
-# PUSHPAK — GPS-Denied Decentralized Search & Rescue
+# PUSHPAK
+
+**Two drones that find people trapped after a building collapse and show rescuers where they are and a way in around known hazards, even with no GPS, phone network or internet.**
+A high drone maps the site and its hazards; a small scout drone searches close to the rubble. The system recommends; the commander decides.
+
+Smart India Hackathon 2026 · Problem statement **SIH26177** (Robotics and Drones, Hardware) · Team **PUSHPAK** (ID 169135) · IIT Patna
+
+> **Honesty rule for everything in this repository:** simulation results are measured; hardware is designed and priced, not yet built. Every capability below is tagged **Tested in sim**, **Partial** or **Planned**, and every number links to the run that produced it.
+
+[Demo video](https://www.youtube.com/watch?v=7YhjT7RUE3g) · [Documentation folder](https://drive.google.com/drive/folders/1dWOjMhhTZMEMRfSpCEtxvJmOTl_CanKN?usp=sharing) · [Bill of materials](https://docs.google.com/spreadsheets/d/1WTH3cI8hqkGVABmWzkk6iyj5YZ8lUyuw/edit?usp=sharing) · [Documentation index](#documentation)
+
+![System architecture](docs/figures/arch_01_system.png)
+
+## At a glance
+
+| | Claim | Measured in simulation |
+|---|---|---|
+| **GPS-denied** | The scout navigates with no GPS, no compass and no absolute yaw source | **0.58 m** mean, 0.80 m max position error over a 62.3 s search (radar emulated) |
+| **Decentralized** | The search never waits on the command post: no broker, no server in the search loop | Command post killed mid-search: the drone kept searching (5.9 m in 8 s). Two real laptops, no router or broker: link loss detected in **1.78 s** |
+| **Decoupled** | Guidance, perception, telemetry and fail-safes are separate processes; one node sends motion commands | Brain process killed in flight: the separate watchdog commanded LAND in **1.05 s** |
+| **Detection** | People are found at any body angle by rotating the image | **3 / 3** survivors found and pinned in each of two simulated flights; 0 false alarms in one bare-ground run |
+
+The simulated radar is truth plus noise, so the 0.58 m figure reflects the noise model, not a real sensor. [docs/GPS_INDEPENDENCE.md](docs/GPS_INDEPENDENCE.md) explains what that number does and does not prove.
+
+## One mission, four steps
+
+| Step | Who | What it does | Output | Status |
+|---|---|---|---|---|
+| 1 · Survey | Drone A, 30–50 m up | Flags visible damage, fire, smoke, water and heat; ranks structures by occupancy (building type, time of day); relays the radio link. Uses GNSS when the fix is healthy and is designed to keep flying without it | Ranked structures + hazard map | **Planned** |
+| 2 · Search | Drone B, no GPS needed | Enters the flagged structure, finds people with on-board AI (RGB now, thermal next), pins each survivor | Survivor pins + photos | **Tested in sim:** 3 / 3 found |
+| 3 · Prioritise + route | Command post | Recommends a rescue order (nearby danger, condition, reachability, confidence) and a route around flagged hazards (A* / D* Lite). The commander confirms before anyone moves | Rescue order + suggested route | **Planned** |
+| 4 · Alert + respond | Dashboard → rescue team | Live survivor pins, telemetry and link status; alerts to the rescue team | Pins and alerts | **Partial:** pins live in sim, alerts planned |
+
+Designed for one disaster first: **earthquake, collapsed buildings.** Floods and landslides need wide-area coverage and longer endurance and are a roadmap item.
+
+## What exists today vs what is planned
+
+Mapped against the eight expected features of PS SIH26177. None is complete; the table says what exists.
+
+| PS expected feature | Exists today (simulation) | Designed (planned) | Status |
+|---|---|---|---|
+| Autonomous navigation, GPS-enabled and GPS-denied | Drone B flies a search pattern with no GPS or compass: IMU + radar velocity + ToF height into an EKF; radar emulated | Drone A on GNSS with a non-GPS fallback; Drone B handed over at the entrance; OAK-D depth avoidance; ducted frame | Partial |
+| On-device AI inference | YOLOv8n people detection on board with 12 rotations; 77 ms per frame on an RTX 3050 laptop GPU | TensorRT on the Orin Nano (not yet timed); hazard classes on Drone A's Hailo-8L NPU | Partial |
+| Multi-sensor fusion (RGB, thermal, IMU, GPS) | IMU + radar + ToF fused; RGB detection | Lepton thermal in the pipeline; GNSS on Drone A | Partial |
+| Hazard classification | Nothing | Thermal hotspots + fire/smoke/water classes; visible damage flagged for an engineer, never judged stable | Planned |
+| Geo-tagged mapping: survivors, hazard zones, access routes | 2D survivor pins in metres from the command post | Lat/long via two GPS-surveyed UWB anchors; hazard zones; suggested route around flagged hazards | Partial |
+| Emergency alerting, prioritised recommendations | Survivor alerts appear on the dashboard | Recommended rescue order; commander confirms | Planned |
+| Offline resilience | Zenoh peer mode, no broker; the search continued after the command post was killed | Reports stored on the drone and re-sent after a link outage (today they are lost) | Partial |
+| Command-centre dashboard | React dashboard: live pins, telemetry, link status | Photo feed, hazard markers, mission status | Partial |
+
+## Planned capabilities
+
+These were promised in the submission and are designed, not built. Each has a design and an open-questions list in [docs/MISSION_DESIGN.md](docs/MISSION_DESIGN.md).
+
+- **Hazard detection (Drone A).** A radiometric thermal core flags hotspots; fire, smoke and water classes run on a Hailo-8L NPU; visible structural damage is flagged for a structural engineer and never labelled "safe". Detectors and training datasets are not chosen yet.
+- **Map generation.** One map for both drones: Drone A's hazard layer and Drone B's survivor pins, joined through UWB anchors at the entrance, two of them GPS-surveyed so pins come out in latitude and longitude.
+- **Survivor emergency alerting.** A ≤ 48-byte survivor alert goes out first and the photo follows when the link allows. Reports are logged on the drone with sequence numbers and re-sent after an outage; repeated fixes of one survivor are merged into one pin with an error circle.
+- **Rescue order and route generation.** The command post ranks survivors by nearby danger, condition, reachability and confidence, and plans a route with A* / D* Lite on a cost grid where flagged fire, water, damage and downed wires are no-go zones. The commander confirms every recommendation.
+- **Drone A navigation.** GNSS when the fix is healthy; ArduPilot EKF3 source switching to camera flow / visual odometry + LiDAR height + UWB when it is not. The non-GPS sensor chain for Drone A is an open design item.
+- **Thermal sensing on Drone B.** FLIR Lepton 3.5 added to the detection pipeline; the RGB-thermal alignment and fusion rule are not designed yet.
+- **Single estimator.** Radar velocity and rangefinder fused directly in ArduPilot EKF3 with an optical-flow fallback, replacing today's two filters in series ([docs/GPS_INDEPENDENCE.md](docs/GPS_INDEPENDENCE.md)).
+
+## Measured results
+
+All in ArduPilot SITL Copter 4.4.4 + Gazebo Harmonic + ROS 2 Humble at real-time factor 1.00, 26–29 Sep 2026, except where marked. Full table, definitions and sources: [docs/EVIDENCE.md](docs/EVIDENCE.md).
+
+| Result | Value |
+|---|---|
+| Position error with no GPS, lawnmower search (28 Sep) | mean **0.58 m**, max 0.80 m, final 0.76 m (estimate vs simulator truth, 72 s window); 10/10 waypoints in 62.3 s |
+| Drift law, 60 s hover with injected radar bias 0 / 0.05 / 0.10 m/s (27 Sep) | 0.28 / 3.20 / 6.19 m against a prediction of 0 / 3 / 6 m; with the shared noise removed, 2.999 m and 6.054 m against 3.000 and 6.000 |
+| Radar fault → velocity uncertainty Tr(Σv) | healthy ≤ 0.023; 0.185 at 1 s; 2.2 at 5 s; recovers within 2 s of the radar returning |
+| FS-4 watchdog (brain killed in flight) | LAND commanded in **1.05 s**; disarmed 5.1 s later |
+| FS-2 isolation (all peers gone) | hold about 2.0 s after the last peer is lost (moved 0.13 m in 6 s of hold); in the live three-peer run it held within 0.10 m for 6 s |
+| Two real laptops, laptop hotspot, no broker (26 Sep, hardware) | peer loss detected in **1.78 s** |
+| Survivor detection, two flights (29 Sep) | 3/3 each; first-fix error 0.14–0.44 m (flight 1); latest-fix error 0.37–1.61 m (run R1) |
+| Offline rotation sweep (clean images, 3 decals × 96 body angles) | plain YOLOv8n 164/288 poses; **12 rotations (the flight setting) 288/288, lowest 0.69**; 24 rotations 288/288, lowest 0.82 |
+| Detection time, RTX 3050 laptop GPU | model call 35 ms at 12 rotations vs 71 ms at 24 (offline, same process); 77 ms per frame in flight at 12 rotations with the simulator running. The Orin Nano has not been timed |
+| Automated tests | 91 pass on `arch/v2` 3329075: pushpak_brain 32, perception 46, gateway 6, Rust 5 + 2 |
+
+## Known limits
+
+Stated before anyone has to find them; details in [§15](#15-honest-limitations) and [docs/ROADMAP.md](docs/ROADMAP.md).
+
+- The radar is emulated (truth plus white noise), and a constant velocity bias is invisible to the filter: drift grows as bias × time.
+- Today's estimator fuses the IMU twice (robot_localization feeds EKF3); the committed fix is one filter in EKF3.
+- Detection is tested on three rendered survivor images; in-flight confidence was 41–84 %. Partly buried people are untested.
+- Survivor reports sent during a link outage are lost, and repeated fixes overwrite each other.
+- Every flight so far is a 6 × 6 m box on clear ground with no obstacle avoidance.
+- No flight hardware is built. The Drone B wiring (rev A) and power-board concept are designs; the bench has a flight controller running Betaflight and a 5-inch test quad.
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `src/pushpak_brain/` | Guidance node (lawnmower search, fail-safes) and the telemetry node (the vehicle's only Zenoh session) |
+| `src/navigation_brain/` | Perception node (YOLOv8n + rotation TTA), altimeter, radar emulator (sim only), ExtNav bridge, arm/takeoff handshake + FS-4 watchdog |
+| `src/drone_bringup/` | Launch file and `config/pushpak_params.yaml`, the single home of every tunable (I-11) |
+| `src/drone_description/` | Gazebo world, drone model, survivor decals |
+| `src/drone_interfaces/` | `SurvivorDetection.msg` (frozen contract) |
+| `src/pushpak_telemetry/`, `src/pushpak_peer/` | Rust telemetry library and a stand-alone Rust Zenoh peer |
+| `proto/pushpak.proto` | Wire format: keyframe, survivor and heartbeat messages |
+| `tools/` | Zenoh → WebSocket gateway, hover-gate evaluator, interop checks |
+| `dashboard/` | React command-post dashboard |
+| `firmware/ardupilot_config/` | ArduPilot parameter lock |
+| `docs/` | Documentation set (below) |
+
+## Quick start
+
+Needs an NVIDIA GPU with the NVIDIA container toolkit; built on an RTX 3050 laptop (6 GB) and an RTX 4070 laptop. Container commands run inside `swarm_brain_container`; see §14 for sourcing.
+
+```bash
+# host
+docker compose build && docker compose up -d
+docker exec -it swarm_brain_container bash
+
+# container: build the workspace once
+source /opt/ros/humble/setup.bash && source /bridge_ws/install/setup.bash
+cd /workspace && colcon build --symlink-install && source install/setup.bash
+
+# container, terminal 1: Gazebo server + ArduPilot SITL + MAVROS (retries past a known gz sensor race)
+./launch_sim.sh
+
+# container, terminal 2: estimator, brain, perception, telemetry, takeoff handshake
+ros2 launch drone_bringup swarm_bringup.launch.py drone_id:=1 use_sim_time:=true auto_takeoff:=true
+
+# container, terminal 3: command-post gateway (Zenoh peer 0 -> WebSocket 8765)
+python3 tools/zenoh_gateway.py --pose-drone-id 1
+
+# host: dashboard on http://localhost:5173
+cd dashboard && npm install && npm run dev
+
+# optional, Gazebo GUI: `xhost +local:root` on the host, then `gz sim -g` in the container
+```
+
+The model weights (`/workspace/yolov8n.pt`) and rosbags are kept out of git (§14). Tests:
+
+```bash
+python3 -m pytest -q src/pushpak_brain/test        # 32
+python3 -m pytest -q src/navigation_brain/test     # 46
+(cd tools && python3 -m pytest -q test_zenoh_gateway.py)   # 6
+cargo test --locked --manifest-path src/pushpak_telemetry/Cargo.toml
+cargo test --locked --manifest-path src/pushpak_peer/Cargo.toml
+```
+
+`colcon test` skips the `pushpak_brain` tests (no pytest test dependency is declared); run pytest directly.
+
+## Documentation
+
+| Document | What it covers |
+|---|---|
+| [docs/PROJECT_RECORD.md](docs/PROJECT_RECORD.md) | Everything built so far: phases, decisions, pull requests, the SIH submission |
+| [docs/EVIDENCE.md](docs/EVIDENCE.md) | Every measured number, how it was measured, and where the data lives |
+| [docs/ODOMETRY_ANALYSIS.md](docs/ODOMETRY_ANALYSIS.md) | Hover-gate drift, the lawnmower track, radar-fault uncertainty, speed tracking, drift budget |
+| [docs/GPS_INDEPENDENCE.md](docs/GPS_INDEPENDENCE.md) | What "GPS-denied" means here, what is emulated, and the path to real GPS independence on both drones |
+| [docs/HARDWARE_AND_THERMAL.md](docs/HARDWARE_AND_THERMAL.md) | Drone A, Drone B and command-post hardware, wiring rev A, power budget, thermal management, cost |
+| [docs/MISSION_DESIGN.md](docs/MISSION_DESIGN.md) | Planned capabilities: hazard detection, mapping, survivor alerting, rescue order and routing |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Phases 1–4, next measurements, open risks |
+| [docs/ZENOH_TWO_LAPTOP_TEST.md](docs/ZENOH_TWO_LAPTOP_TEST.md), [docs/RUST_PYTHON_HEARTBEAT_CHECK.md](docs/RUST_PYTHON_HEARTBEAT_CHECK.md) | Telemetry acceptance tests |
+
+## Team
+
+| Person | Owns |
+|---|---|
+| Ashutosh (lead) | State machine, estimator and middleware; simulation and navigation stack; integration |
+| Aditya | Simulation worlds; operator dashboard |
+| Raunak | Perception pipeline (YOLO + rotation TTA, optical flow); offline rotation sweep; drift analysis tools |
+| Kanishk | Hardware: Drone B wiring and power board, bench rig, 5-inch test quad; Rust telemetry library and peer |
+| Priya, Bhavya | Presentation and architecture defence |
+
+## Branches and releases
+
+- `arch/v2-degraded-estimation` is the working branch (printed on the SIH deck). Every change lands there by pull request.
+- `main` mirrors `arch/v2` and is moved forward (fast-forward only) after merges; it is the default branch.
+- `v0.1-fallback-demo` (tag, 4cc7265) is the frozen v0.1 Redis build. It fed the flight controller ground truth and is kept only as history.
+- Superseded feature branches are kept as `archive/<branch>` tags.
+
+---
+
+# Engineering contract
+
+Sections 1–18 are the v2 engineering contract. Their numbers are referenced from code and pull requests; do not renumber them.
 
 **Motto: GPS-DENIED · DECENTRALIZED · DECOUPLED.**
 Every change strengthens at least one of these, or is registered in §13 as a scaffold
 with a written removal gate.
-
-| Ref | What it is |
-|---|---|
-| `v0.1-fallback-demo` (tag), `fallback/v0.1-demo` (branch) | Frozen submission floor. Redis bus. **ExtNav fed from Gazebo ground truth** — stated limitation. Never merge into it. |
-| `arch/v2-degraded-estimation` | This document. All v2 work targets this branch. |
-| `main` | Equals the fallback tag until v2 flies end-to-end. Not touched. |
-
----
 
 ## 1. Frozen Stack
 
@@ -35,7 +207,7 @@ rustc 1.98.1 (observed; pinned at next Dockerfile change) · setuptools 59.6.0 f
 asserted at build time — never pip-install or upgrade it. No Redis in the v2 image.
 Build hosts run Docker with `"features": {"containerd-snapshotter": false}`; the
 containerd image store keeps each image about three times and does not fit an 80 GB
-partition.
+partition. The same Dockerfile also builds on an RTX 4070 laptop (same driver), 2 Oct 2026.
 
 **Out of scope, by decision:** PX4, Micro XRCE-DDS, Gazebo Classic, ROS 2 Jazzy, Redis,
 `zenoh-pico`, `zenohd` routers, LoRa telemetry (not an IP link; Zenoh cannot use it),
@@ -84,7 +256,7 @@ EMULATION / PERCEPTION
     Pipeline A  Lucas-Kanade + gyro de-rotation + pinhole(camera_info, ToF)
                 -> /visual/velocity   (R ramps 0.05 -> 1e6 under dust)
                 PARKED until after 30 Sep: the demo runs visual-absent (§16)
-    Pipeline B  YOLOv8n + rotation TTA (15° steps), conf >= 0.4, 2 Hz
+    Pipeline B  YOLOv8n + rotation TTA (12 × 30°, pushpak_params.yaml), conf >= 0.4, 2 Hz
                 -> /detections/survivor
  v
 ESTIMATION
@@ -103,7 +275,7 @@ GUIDANCE
   pushpak_brain (Python) @20Hz, starts on /pushpak/airborne == true
     exploration waypoint list -> P follower -> clamps -> failsafes
     FS-2 from /pushpak/peers_alive
-    keyframe FIFO for FS-3 backtracking (stretch, §10)
+    FS-3 designed, not in the demo build (§10)
     -> /mavros/setpoint_velocity/cmd_vel      SINGLE WRITER
   telemetry adapter   the vehicle's only Zenoh session, drone_id = vehicle id
     /odometry/filtered, /detections/survivor -> zenoh keyframe / survivor / heartbeat
@@ -194,9 +366,9 @@ altitude as a Z-only pose for that reason.
 | `model_path` | string | `/workspace/yolov8n.pt` | `.pt` or a TensorRT `.engine`. Engines are built on the target device. |
 | `device` | string | `cuda:0` | `cpu` allowed for bench tests |
 | `imgsz` | int | 416 | Rotated frames are padded to a 400 px square |
-| `conf_threshold` | double | 0.4 | Provisional until the bare-ground false-positive run (§16). 0.85 was unreachable: the clean source decals score 0.68–0.79 |
+| `conf_threshold` | double | 0.4 | Bare-ground run 29 Sep: 0 detections (bag `phase5_bare`); rubble backgrounds untested. 0.85 was unreachable: the clean source decals score 0.68–0.79 |
 | `max_rate_hz` | double | 2.0 | Pipeline B only |
-| `tta_angles_deg` | integer[] | 0, 15, …, 345 | Rotation test-time augmentation in one batched predict; box centres mapped back through the inverse rotation (§15 item 8) |
+| `tta_angles_deg` | integer[] | 0, 15, …, 345 (24) in code; `pushpak_params.yaml` sets 0, 30, …, 330 (12) for flight | Rotation test-time augmentation in one batched predict; box centres mapped back through the inverse rotation (§15 item 8) |
 | `enable_visual_velocity` | bool | false in the demo | Launch-time only, never switched at runtime (I-6). false: Pipeline A off, `/visual/velocity` not published, which is the configuration the §17 gate measured |
 
 Values live in `pushpak_params.yaml` under `perception_node`. ROS 2 Humble fixes each parameter's type from the code default, so a value of another type stops the node at startup: write `2.0`, not `2`, for a double, and integers for `tta_angles_deg`.
@@ -351,23 +523,28 @@ drone id; Redis leftovers deleted. `EkfHealthPanel.tsx` is deferred: no producer
 
 ## 10. Failsafe Hierarchy
 
-Evaluated in `pushpak_brain` at 20 Hz in this priority order. First match wins.
+Evaluated in `pushpak_brain` at 20 Hz in this priority order. First match wins. The ladder below is
+the one submitted on 30 Sep (deck slide 4); rows marked *designed* are not in the code.
 
-| Priority | Failsafe | Trigger | Action |
-|---|---|---|---|
-| 1 | **FS-5 FCU rejection** | MAVROS mode ≠ GUIDED, or disarmed, while airborne | Stop publishing, log, never fight the FCU. |
-| 2 | **FS-3 Topological backtrack** | Visual covariance ≥ 1e6 **and** `Tr(Σ_v)` of `/odometry/filtered` > `backtrack_cov_threshold` (Note: Dust alone cannot trigger FS-3; radar loss is an injected fault via `/sim/fault/radar`) | Abort exploration. Reverse the keyframe FIFO at ≤ 1.0 m/s, acceptance sphere 0.4 m, until the visual baseline returns or any peer is heard. |
-| 3 | **FS-2 Isolated** | No heartbeat from **any** other peer, ground station included, for > 2.0 s. In `pushpak_brain`: `/pushpak/peers_alive` never heard, older than `isolation_timeout_s`, or empty | Halt exploration and hold (zero velocity); resume at the same waypoint when a peer returns. Bit 4 once the brain's flags reach telemetry (§16). |
-| 4 | **FS-1 Visual dropout** | Visual covariance ≥ 1e6 | Continue on radar-inertial. Clear bit 0. |
-| — | **FS-4 Guidance liveness** | `arm_takeoff_handshake.py` sees no `cmd_vel` for > 1.0 s after airborne | Sidecar commands `SetMode LAND`. Lives outside `pushpak_brain` because it covers `pushpak_brain` dying. |
+| Priority | Failsafe | Trigger | Action | Status |
+|---|---|---|---|---|
+| 1 | **FS-5 FCU rejection** | MAVROS mode ≠ GUIDED, or disarmed, while airborne | Stop publishing, log, never fight the FCU. | Built, unit-tested |
+| 2 | **FS-3 Velocity lost** | Visual covariance ≥ 1e6 **and** `Tr(Σ_v)` of `/odometry/filtered` > `backtrack_cov_threshold` (radar loss is an injected fault via `/sim/fault/radar`; dust alone cannot trigger it) | Fall back to optical-flow velocity (Pipeline A); if that is also unavailable, hold or land. | *Designed*; deferred from the demo build to make the 30 Sep demo possible |
+| 3 | **FS-2 Isolated** | No heartbeat from **any** other peer, ground station included, for > 2.0 s. In `pushpak_brain`: `/pushpak/peers_alive` never heard, older than `isolation_timeout_s`, or empty | Halt exploration and hold (zero velocity); resume at the same waypoint when a peer returns. *Designed next:* retrace the keyframe trail to the last point with a link instead of holding. Bit 4 once the brain's flags reach telemetry (§16). | Hold built (#35); retrace designed |
+| 4 | **FS-1 Visual dropout** | Visual covariance ≥ 1e6 | Continue on radar-inertial. Clear bit 0. | Built; no effect while Pipeline A is parked |
+| — | **BAT Battery low** | Pack below the return reserve | Return to the entrance; never land inside the void. | *Designed* |
+| — | **FS-4 Guidance liveness** | `arm_takeoff_handshake.py` sees no `cmd_vel` for > 1.0 s after airborne | Sidecar commands `SetMode LAND`. Lives outside `pushpak_brain` because it covers `pushpak_brain` dying. It shares the computer, kernel and power with the brain, so it is a separate process, not an independent system. | Built; LAND in 1.05 s |
+| — | **FC Companion power lost** | Jetson loses power mid-flight | ArduPilot's own `GUID_TIMEOUT` behaviour and battery fail-safe are the last independent layer. | *To measure* on the bench |
 
-`backtrack_cov_threshold` = 0.2, derived from hover-gate data (§17).
+`backtrack_cov_threshold` = 0.2, derived from hover-gate data (§17). Its parameters
+(`backtrack_cov_threshold`, `backtrack_speed_mps`, `backtrack_accept_radius_m`) are declared in
+`pushpak_params.yaml` but unused until FS-3 is built.
 
-**Implemented as of 28 Sep:** FS-5, FS-2 (#35) and FS-4. **FS-3 is a stretch goal** and is not
-in the demo unless it passes its own gate. Its end condition as written is contradictory: with
-any peer alive, "until any peer is heard" ends backtracking the moment it starts. If built, it
-ends when `Tr(Σ_v)` falls back under the threshold or the FIFO is exhausted. **FS-1** has no
-effect while Pipeline A is parked.
+**Why FS-3 changed from backtracking.** The earlier definition reversed the keyframe FIFO until "any peer
+is heard", which ends the moment it starts whenever a peer is alive, and it retraced the very estimate
+that had just lost its velocity sensor. Lost velocity and lost link need opposite responses: a velocity
+fault needs a second velocity source (optical flow) or a stop; a link fault needs movement back toward
+the link. `Tr(Σ_v)` also cannot see a constant bias (§15 item 1), so FS-3 catches sensor faults only.
 
 ---
 
@@ -444,7 +621,9 @@ cd sih_drone_root
 git fetch origin
 git checkout -b <feat/your-branch> origin/arch/v2-degraded-estimation
 ```
-- PRs target `arch/v2-degraded-estimation`. Never `main`, never `fallback/*`.
+- PRs target `arch/v2-degraded-estimation`. Never `main` directly: after merges, `main` is fast-forwarded
+  to `arch/v2` (admin push, only after `git merge-base --is-ancestor origin/main origin/arch/v2-degraded-estimation`).
+- Superseded branches are tagged `archive/<branch>` before they are deleted.
 - Every PR description states: which invariant(s) it serves, the verification commands
   run, and their output.
 - Review submission: `git diff origin/arch/v2-degraded-estimation...<branch>`.
@@ -487,18 +666,31 @@ State these before judges find them.
 6. **The v0.1 fallback** navigates on ground-truth ExtNav and is labelled as such. It can
    no longer be rebuilt from its Dockerfile (upstream withdrew the Humble MAVROS binaries);
    the recorded demo is the artefact.
-7. **No flight hardware is built.** Hardware evidence is a hand-carried desk rig: a laptop in place of the Jetson Orin
-   Nano, USB camera, an unarmed ArduPilot FC as IMU, and optionally an IWR6843 radar. Drone B
-   is a design target: estimated 600–760 g all-up and 5–7 minutes' endurance. Sub-GHz HaLow
-   is a design target; the rig uses a standard Wi-Fi router. Tested 26 Sep: an Android hotspot and campus Wi-Fi both block device-to-device traffic (client isolation), and the two-laptop Zenoh test passed only on a laptop-hosted access point. The demo brings its own network and checks it with a two-machine ping before any Zenoh run.
+7. **No flight hardware is built.** The planned ArduPilot desk rig (laptop + ArduPilot FC as IMU + USB camera,
+   T-6) was not built: the team's flight controller runs Betaflight and has no ArduPilot build. The bench has
+   that flight controller, a laptop webcam and a 5-inch test quad; nothing has flown under this stack. Drone B
+   is a design target (wiring rev A, power-board concept; `docs/HARDWARE_AND_THERMAL.md`); its weight and
+   endurance are not yet established. The mesh radio is a design target. Tested 26 Sep: an Android hotspot and
+   campus Wi-Fi both block device-to-device traffic (client isolation), and the two-laptop Zenoh test passed only
+   on a laptop-hosted access point. The demo brings its own network and checks it with a two-machine ping before
+   any Zenoh run.
 8. **The detector is COCO-pretrained YOLOv8n, not an aerial model.** Top-down people are detected
    only when they appear upright in the image: in simulation `victim_03` scored 0.83 at yaw 0 and
-   nothing at five other yaws. Rotation test-time augmentation in 15° steps recovered every tested
-   orientation (10 in-flight frames, 0.42–0.91). Validated on three synthetic decals only; false
-   positives over rubble or bare ground are untested (§16). An aerial-trained model is future work.
-9. **Drift during the search pattern, measured 28 Sep** (radar bias 0, 72 s of the lawnmower, bag
-   `phase4_lawnmower_2026-09-28`): estimate-vs-truth error max 0.51 m, mean 0.30 m. Survivor
-   positions on the dashboard carry this error.
+   nothing at five other yaws. Offline sweep on the three clean decals × 96 body angles: plain YOLOv8n
+   found 164 of 288 poses above 0.40; 24-rotation TTA (15° steps) found 288 of 288, lowest 0.82. The flight
+   setting, 12 rotations (30°), also found 288 of 288, lowest 0.69, at half the model time (35 vs 71 ms,
+   `tools/eval_tta_12v24.py`, 2 Oct). In flight, confidence was lower:
+   41 %, 84 % and 67 % on the dashboard in run R1. Validated on three synthetic decals only; one bare-ground
+   run gave 0 detections; rubble backgrounds and partly buried people are untested. Rotation-augmented
+   training on aerial images is future work.
+9. **Position error during the search pattern, measured 28 Sep** (radar bias 0, 72 s of the lawnmower, bag
+   `phase4_lawnmower_2026-09-28`): absolute estimate-vs-truth error mean 0.58 m, max 0.80 m, final 0.76 m.
+   Drift within the window (the 0.30 m starting offset removed) is mean 0.30 m, max 0.51 m; the two metrics
+   are never mixed. Survivor positions on the dashboard carry the absolute error.
+10. **Speed is not held at the commanded limit.** `pushpak_brain` clamps every command to ≤ 0.70 m/s, but in
+   the same run the 1-second speed reached 1.30 m/s and surged with a period of about 4 s (truth and the
+   estimate agree, so this is velocity tracking in the flight controller, not estimation). Cause not yet
+   tested; see `docs/ODOMETRY_ANALYSIS.md`.
 
 ---
 
@@ -507,11 +699,12 @@ State these before judges find them.
 | Item | Owner | Due |
 |---|---|---|
 | Pipeline A (optical flow, Laplacian dust metric) parked: not shipped before 30 Sep; the demo runs visual-absent, the gated configuration. Verify the roll de-rotation sign before it ships | Raunak | after 30 Sep |
-| Bare-ground false-positive check for YOLO + TTA at `conf_threshold` 0.4 | Ashutosh | before any recording |
+| Bare-ground false-positive check for YOLO + TTA at `conf_threshold` 0.4 | Ashutosh | **done 29 Sep**: 0 detections (`phase5_bare`) |
 | `victim_02` decal scores only 0.42 with TTA; replace it with a higher-resolution top-down image | Aditya | 28 Sep |
 | `ekf_health` is transmitted but no producer sets `status_flags` bits 0, 1, 3 or 4; add `EkfHealthPanel.tsx` once one does | Ashutosh | after the demo path works |
-| Hardware inventory and rig tier (1/2/3) | Kanishk | Day 1, **overdue** |
-| HaLow channel-plan legality in India (design target) | Kanishk | before the deck freezes |
+| Hardware inventory and rig tier (1/2/3) | Kanishk | **done 29 Sep**: Betaflight flight controller + ESC, webcam, 5-inch test quad; T-6 fired |
+| 12-rotation offline sweep (the flight setting) and a controlled 12 vs 24 timing | Raunak / Ashutosh | **done 2 Oct**: 288/288, lowest 0.69; model call 35 vs 71 ms |
+| Find the cause of the speed surging in GUIDED velocity mode (§15 item 10) | Ashutosh | before the next flight test |
 | Pin rustc 1.98.1 in `Dockerfile`; delete build dirs in the same layer to shrink the image | Ashutosh | next Dockerfile change |
 | SITL LAND panic (`Location::get_alt_cm` on an uninitialised location) not reproduced on 28 Sep: on a clean launch, after a 53 s hover, killing `pushpak_brain` fired FS-4 in 1.05 s and the vehicle landed and disarmed 5.1 s later (bag `fs4_land_2_2026-09-27`). In hover the FCU rangefinder read 1.63 m and the FCU global position stayed 0/0, so LAND took the rangefinder route. Likely remaining panic path: rangefinder unhealthy when LAND starts, falling back to a location with no lat/lon. Operating rule: LAND begins inside the rangefinder range (0.10–4.0 m). Conditions of the original failure were not recorded; 27 Sep evening runs also had nodes surviving from earlier launches (fixed in `launch_sim.sh`). | Ashutosh | residual; recheck if flight altitude changes |
 
@@ -526,7 +719,7 @@ A tripwire is decided in advance and executed without debate when its deadline p
 | T-3 | TI radar not streaming a point cloud on the Jetson | 24 h after the Jetson is first powered | Radar leaves the rig: camera + YOLO + Zenoh, FC as IMU. No hardware is ordered. |
 | T-4 | `rclrs` not building in the container | fired Day 2 (§1) | `pushpak_brain` is Python. |
 | T-5 | `collapse.sdf` not merged | Day 6, **fired** | Demo runs in `swarm.sdf`; S-5 stays, and the deck says so. |
-| T-6 | Desk rig (laptop + ArduPilot FC as IMU + USB camera, `perception_node` live) not producing real detections on the dashboard | end of 29 Sep | Submit without rig footage; hardware is described as a design target only. |
+| T-6 | Desk rig (laptop + ArduPilot FC as IMU + USB camera, `perception_node` live) not producing real detections on the dashboard | **fired 29 Sep** (no ArduPilot build for the team's flight controller) | Submit without rig footage; hardware is described as a design target only. |
 
 Only one `pushpak_brain` implementation is ever launched (I-3).
 
@@ -611,3 +804,24 @@ changing Q or the fusion matrix invalidates it.
   about 2 s after the peer stopped; oversize and id-mismatch payloads rejected; the Rust peer
   decoded the gateway's heartbeat.
 - In every flight run `pushpak_brain` was the only `cmd_vel` publisher (I-3).
+- Speed: commanded ≤ 0.70 m/s; flown up to 1.30 m/s (1 s average) with surging (§15 item 10).
+
+---
+
+## 19. Phase 5 Evidence (29 Sep)
+
+- **Detection flight 1** (bag `phase5_detect`, reindexed): 3/3 survivors found, first-fix error 0.14–0.44 m;
+  5 detections, 26 crops saved.
+- **Bare ground** (bag `phase5_bare`): 0 detections at `conf_threshold` 0.4.
+- **Run R1** (bag `phase5_R1_2026-09-29`, the demo video): 3/3 found, 84 detections; dashboard confidences
+  41 / 84 / 67 %; latest-fix error 0.37–1.61 m (victim_03 0.37, victim_02 0.84, victim_01 1.61). The dashboard
+  keeps only the latest fix, which is why victim_01 ends 1.6 m off.
+- **Telemetry live, three peers** (drone, gateway, Rust peer; 29 Sep 00:35): gateway killed → the drone kept
+  searching (5.9 m in 8 s); last peer killed → FS-2 decided 0.05 s after the peer list emptied and held within
+  0.10 m for 6 s; a fake survivor sent three times showed as one.
+- **Detection time:** 75–77 ms per frame at 12 rotations on the RTX 3050 laptop GPU with the Gazebo GUI and
+  recording running. 24 rotations measured 561 ms in a different session; the two are not a controlled
+  comparison. The controlled comparison (2 Oct, offline, one process, median of 288 frames): 35.2 ms at
+  12 rotations vs 71.0 ms at 24. The same run found 288/288 poses at 12 rotations (lowest 0.69) and
+  reproduced the 24-rotation sweep within 0.001.
+- **Tests:** 91 pass on 3329075 (2 Oct): `pushpak_brain` 32, perception 46, gateway 6, Rust 5 + 2.
