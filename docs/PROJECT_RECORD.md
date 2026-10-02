@@ -108,6 +108,6 @@ Also submitted on the portal: title and abstract, technology bucket Mechatronics
 | 36 | Kill surviving ROS nodes on relaunch; SITL LAND panic not reproduced |
 | 37 | 28 Sep decisions and Phase 4 evidence |
 | 38 | Telemetry node: keyframes, survivors with dedup, heartbeat, peer liveness |
+| 39 | Offline drift animation and TTA sweep tools; drift card reports absolute error; 12 vs 24 rotation sweep |
 | 40 | Launch perception_node (12-rotation TTA, visual velocity off); parameter-type note |
 
-#39 (offline drift animation and rotation sweep tools, Raunak) carries the 12 vs 24 sweep tool and the corrected drift statistics.
