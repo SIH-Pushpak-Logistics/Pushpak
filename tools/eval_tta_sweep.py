@@ -511,9 +511,9 @@ def main():
     # Generate Slide Text
     slide_lines = [
         f"Plain YOLO baseline: {plain_above_40} of {len(rows)} orientations detected above 0.40 threshold",
-        f"with TTA, every tested orientation stayed above 0.40; lowest 0.42 (victim_02)",
+        f"With {len(DEFAULT_TTA_ANGLES)}-rotation TTA: {tta_above_40} of {len(rows)} above 0.40; lowest {lowest_tta_conf:.2f} ({lowest_tta_decal} at {lowest_tta_angle:.1f}°)",
         f"Worst-case orientation ({worst_plain_row['decal']} at {worst_plain_row['body_angle_deg']}°): recovered from {worst_plain_row['plain_conf']:.2f} to {worst_plain_row['tta_conf']:.2f}",
-        f"TTA inference latency: [TTA ms/frame on RTX 3050]",
+        f"{len(DEFAULT_TTA_ANGLES)}-rotation batch, model call only, offline: median {np.median(tta_timings) * 1000.0:.1f} ms",
     ]
     with open(args.output_slide_text, "w", encoding="utf-8") as f:
         f.write("\n".join(slide_lines) + "\n")

@@ -80,7 +80,7 @@ def first_covered(track, victims, yaw):
 
 
 def stats(track):
-    d = track['d_m']
+    d = np.hypot(track['est_x'] - track['true_x'], track['est_y'] - track['true_y'])
     i = int(np.argmax(d))
     return float(d.mean()), float(d[i]), float(track['t_s'][i]), float(d[-1])
 
