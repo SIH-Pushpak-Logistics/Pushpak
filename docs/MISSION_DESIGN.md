@@ -43,7 +43,9 @@ Today: survivor pins in metres from the command-post origin, drawn live on the d
 
 **Ranking which structure to search first.** Thermal from 30–50 m cannot see people under a slab, so Drone A ranks structures with an occupancy prior (building type, time of day) plus visible damage. The prior comes from census or municipal records and from the commander.
 
-**Open.** Detector architecture, training datasets and target recall per class are not chosen; thermal thresholds are not set; there is no detector yet for downed wires (they are marked by the commander). Answering this is the first item of roadmap Phase 2.
+**Exists (offline only).** A first fire and smoke detector: YOLOv8n fine-tuned on D-Fire, mAP50 0.81 smoke and 0.70 fire on the dataset's test split (`docs/EVIDENCE.md` E20). It is not on a drone, not in simulation, and D-Fire images are not aerial views.
+
+**Open.** The water and damage detectors and their datasets, aerial training data for fire and smoke, and target recall per class are not chosen; thermal thresholds are not set; there is no detector yet for downed wires (they are marked by the commander). Answering this is the first item of roadmap Phase 2.
 
 ## 3. Survivor detection (Drone B)
 

@@ -89,3 +89,8 @@ bags/
 target/
 !src/pushpak_peer/testdata/
 !src/pushpak_peer/testdata/keyframes.csv
+
+# datasets, training runs and model weights stay out of git (README §14)
+/data/
+/runs/
+/weights/

@@ -52,7 +52,7 @@ Better slides cannot raise PUSHPAK's technical credibility; only measurements ca
 | 6 | Survivor reports lost during link outages | Evidence lost when it matters most | Backlog: on-drone log + replay |
 | 7 | No obstacle avoidance; clear-ground flights only | First real void flight may end wedged | OAK-D avoidance, ducted frame, rubble world |
 | 8 | Drone A not simulated; two-drone run never done | Two-tier claim unproven | Drone A in simulation |
-| 9 | Hazard detectors and datasets unnamed; no walkability layer | Route only as good as the map | Phase 2 hazard work |
+| 9 | Hazard detection is one offline fire/smoke model (D-Fire, not aerial); water and damage unnamed; no walkability layer | Route only as good as the map | Phase 2 hazard work |
 | 10 | BOM out of date (Drone A additions; two parts listed at ₹0, not owned) | Cost claim | Re-priced BOM |
 | 11 | Weather (rain, dust, monsoon wind at 50 m) not addressed | Field operation | Wind and dust limits per drone |
 | 12 | Nothing fabricated in a hardware-category entry | A jury will ask to see it fly | Bench → HIL → first flight of the test quad |

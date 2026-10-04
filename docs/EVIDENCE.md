@@ -11,6 +11,7 @@ Every number PUSHPAK quotes, how it was measured, and where the data lives. If a
 - The drone never sees simulator truth. Truth (`/sim/ground_truth/odom`) feeds only the radar emulator and offline scoring (invariant I-8).
 - The simulated radar is truth body velocity plus white noise (σ 0.15 m/s) and an optional injected bias. It is an emulator, not a radar model.
 - About a dozen named, logged runs between 26 and 29 Sep 2026. Bags, CSVs and recordings are kept on the team drive, not in git.
+- Three results are not simulation and are marked so: E10 (two real laptops), E20 (an offline dataset test on an RTX 4070 laptop GPU) and E21 (a bench check with a real camera).
 
 ## Results
 
@@ -35,6 +36,8 @@ Every number PUSHPAK quotes, how it was measured, and where the data lives. If a
 | E17 | 2 Oct | Automated tests on `arch/v2` 3329075 | 91 pass: pushpak_brain 32, perception 46, gateway 6, Rust 5 + 2 | LOQ container run |
 | E18 | Sep | Docker image rebuilt on a second machine | stack rebuilt and ran; the image also builds on an RTX 4070 laptop (2 Oct) | `Dockerfile` |
 | E19 | 2 Oct | Offline 12 vs 24 rotations, same images, one process, RTX 3050 laptop GPU | **12 rotations (flight setting): 288/288**, lowest 0.69 (victim_02 at 22.5°), 26 of 288 below 0.80; 24 rotations: 288/288, lowest 0.82, reproducing E15 within 0.001; model call median **35.2 ms vs 71.0 ms** | `tools/eval_tta_12v24.py`, `tta_sweep_12v24.csv` |
+| E20 | 4 Oct | Fire and smoke detector, D-Fire test split (**offline, not simulation**) | YOLOv8n from COCO weights, fine-tuned on the D-Fire training split. 4,302 test images, 5,186 boxes: **smoke mAP50 0.809** (P 0.784, R 0.762, mAP50-95 0.492; 2,311 boxes in 2,077 images), **fire mAP50 0.697** (P 0.691, R 0.633, mAP50-95 0.364; 2,875 boxes in 1,113 images); both classes mAP50 0.753, mAP50-95 0.428 | `tools/hazard_dfire.yaml`, run `runs/hazard/dfire_y8n` and `dfire_y8n_test` (weights and curves on the team drive) |
+| E21 | 4 Oct | Bench check: real camera, real person (**hardware**) | Laptop webcam, one person lying on the floor in dim light, YOLOv8n person class on a laptop, overlay rate 8–11 fps; the flight controller (HAKRC F405 V2, Betaflight 4.5.1) supplied roll, pitch and heading live over USB. A box was on screen in **about 55 %** of the 625 recorded frames (20.9 s); longest gap about 0.7 s; one person sometimes drew two boxes | screen recording on the team drive (Kanishk's bench script) |
 
 ## Two error metrics, never mixed
 
@@ -69,6 +72,25 @@ The flight setting (12 rotations, 30° apart) finds every test pose that 24 rota
 
 ![Detection time](figures/data_07_latency.png)
 
+## Fire and smoke detector (E20)
+
+How it was run, 4 Oct, in the project container on an RTX 4070 laptop GPU (Ultralytics, image size 640, batch 32):
+
+```
+yolo detect train model=/workspace/yolov8n.pt data=tools/hazard_dfire.yaml epochs=30 imgsz=640 batch=32 workers=4 device=0 patience=8 project=runs/hazard name=dfire_y8n exist_ok=True
+yolo detect val model=runs/hazard/dfire_y8n/weights/best.pt data=tools/hazard_dfire.yaml split=test imgsz=640 batch=32 device=0 project=runs/hazard name=dfire_y8n_test exist_ok=True
+```
+
+- Dataset: D-Fire, pre-split (Venâncio et al., Neural Computing and Applications, 2022; [github.com/gaiasd/DFireDataset](https://github.com/gaiasd/DFireDataset)). Classes: 0 smoke, 1 fire. Images with neither are kept as negatives.
+- The best checkpoint was chosen on the validation split. The test split was scored once, after training. Ultralytics skipped the few test images whose labels fall outside the image; 4,302 were scored.
+- The dataset and the weights are not in git (README §14).
+
+![Precision-recall, D-Fire test split](figures/hazard_01_dfire_pr.png)
+
+![Confusion matrix, D-Fire test split](figures/hazard_02_dfire_confusion.png)
+
+![Sample predictions, D-Fire test split](figures/hazard_03_dfire_pred.jpg)
+
 ## Design parameters (set, not measured)
 
 | Parameter | Value | Where |
@@ -86,7 +108,9 @@ The flight setting (12 rotations, 30° apart) finds every test pose that 24 rota
 - **35, 71 and 77 ms are laptop-GPU numbers, not the drone computer.** The Orin Nano has not been timed. 35 vs 71 ms is the controlled comparison (model call only, offline); 77 ms is the full in-flight frame with the simulator running. An earlier 24-rotation reading (561 ms) came from a different session and is not comparable.
 - **288/288 comes from three clean rendered images**, at both 12 and 24 rotations. Three images are not a recall measurement; partly buried, dusty people are untested.
 - **3/3 is two flights over three rendered survivors on clear ground.** It shows the pipeline works end to end, not field recall.
-- **1.78 s is the only network result on real hardware** (two laptops). Everything else ran in simulation.
+- **1.78 s is the only network result on real hardware** (two laptops). Everything else ran in simulation, except the offline dataset test (E20) and the bench check (E21).
+- **0.81 and 0.70 are dataset scores, not flight results.** D-Fire images are ground-level and surveillance views, not a drone looking down from 30–50 m. The model is not in `perception_node`, has not run in simulation and has not been timed on a drone computer. There are no water or damage classes.
+- **The bench check is one person, one room, 21 s.** It shows the detector working on a real camera with intermittent boxes; it is not a recall measurement. The clip does not record the rotation setting or the compute device, and nothing was flying.
 - **The cost (₹3.87–4.50 lakh) is a prototype parts estimate**, not a unit price, and predates the Drone A additions (`docs/HARDWARE_AND_THERMAL.md`).
 
 ## Pending measurements
