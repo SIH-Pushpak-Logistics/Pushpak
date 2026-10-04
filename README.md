@@ -42,7 +42,7 @@ Mapped against the eight expected features of PS SIH26177. None is complete; the
 | Autonomous navigation, GPS-enabled and GPS-denied | Drone B flies a search pattern with no GPS or compass: IMU + radar velocity + ToF height into an EKF; radar emulated | Drone A on GNSS with a non-GPS fallback; Drone B handed over at the entrance; OAK-D depth avoidance; ducted frame | Partial |
 | On-device AI inference | YOLOv8n people detection on board with 12 rotations; 77 ms per frame on an RTX 3050 laptop GPU | TensorRT on the Orin Nano (not yet timed); hazard classes on Drone A's Hailo-8L NPU | Partial |
 | Multi-sensor fusion (RGB, thermal, IMU, GPS) | IMU + radar + ToF fused; RGB detection | Lepton thermal in the pipeline; GNSS on Drone A | Partial |
-| Hazard classification | Nothing | Thermal hotspots + fire/smoke/water classes; visible damage flagged for an engineer, never judged stable | Planned |
+| Hazard classification | Fire and smoke detector (YOLOv8n trained on D-Fire), scored offline on the dataset's test split: mAP50 0.81 smoke, 0.70 fire. Not on a drone and not in simulation | Thermal hotspots; water class; the detector on Drone A's NPU; visible damage flagged for an engineer, never judged stable | Partial |
 | Geo-tagged mapping: survivors, hazard zones, access routes | 2D survivor pins in metres from the command post | Lat/long via two GPS-surveyed UWB anchors; hazard zones; suggested route around flagged hazards | Partial |
 | Emergency alerting, prioritised recommendations | Survivor alerts appear on the dashboard | Recommended rescue order; commander confirms | Planned |
 | Offline resilience | Zenoh peer mode, no broker; the search continued after the command post was killed | Reports stored on the drone and re-sent after a link outage (today they are lost) | Partial |
@@ -52,7 +52,7 @@ Mapped against the eight expected features of PS SIH26177. None is complete; the
 
 These were promised in the submission and are designed, not built. Each has a design and an open-questions list in [docs/MISSION_DESIGN.md](docs/MISSION_DESIGN.md).
 
-- **Hazard detection (Drone A).** A radiometric thermal core flags hotspots; fire, smoke and water classes run on a Hailo-8L NPU; visible structural damage is flagged for a structural engineer and never labelled "safe". Detectors and training datasets are not chosen yet.
+- **Hazard detection (Drone A).** A radiometric thermal core flags hotspots; fire, smoke and water classes run on a Hailo-8L NPU; visible structural damage is flagged for a structural engineer and never labelled "safe". A first fire and smoke detector exists offline (YOLOv8n on D-Fire, [docs/EVIDENCE.md](docs/EVIDENCE.md) E20); it is not on a drone or in simulation. Water and damage detectors and their datasets are not chosen yet.
 - **Map generation.** One map for both drones: Drone A's hazard layer and Drone B's survivor pins, joined through UWB anchors at the entrance, two of them GPS-surveyed so pins come out in latitude and longitude.
 - **Survivor emergency alerting.** A ≤ 48-byte survivor alert goes out first and the photo follows when the link allows. Reports are logged on the drone with sequence numbers and re-sent after an outage; repeated fixes of one survivor are merged into one pin with an error circle.
 - **Rescue order and route generation.** The command post ranks survivors by nearby danger, condition, reachability and confidence, and plans a route with A* / D* Lite on a cost grid where flagged fire, water, damage and downed wires are no-go zones. The commander confirms every recommendation.
@@ -76,6 +76,8 @@ All in ArduPilot SITL Copter 4.4.4 + Gazebo Harmonic + ROS 2 Humble at real-time
 | Offline rotation sweep (clean images, 3 decals × 96 body angles) | plain YOLOv8n 164/288 poses; **12 rotations (the flight setting) 288/288, lowest 0.69**; 24 rotations 288/288, lowest 0.82 |
 | Detection time, RTX 3050 laptop GPU | model call 35 ms at 12 rotations vs 71 ms at 24 (offline, same process); 77 ms per frame in flight at 12 rotations with the simulator running. The Orin Nano has not been timed |
 | Automated tests | 91 pass on `arch/v2` 3329075: pushpak_brain 32, perception 46, gateway 6, Rust 5 + 2 |
+| Fire and smoke detector, D-Fire test split (4 Oct, offline, not simulation) | YOLOv8n fine-tuned on D-Fire; 4,302 test images: smoke mAP50 **0.81** (P 0.78, R 0.76), fire mAP50 **0.70** (P 0.69, R 0.63); both classes 0.75 |
+| Bench check, real camera and real person (4 Oct, hardware) | laptop webcam, a person lying on the floor in dim light, YOLOv8n at 8–11 fps on a laptop, flight-controller attitude read live: a box in about 55 % of a 21 s recording, longest gap under 1 s |
 
 ## Known limits
 
@@ -83,7 +85,8 @@ Stated before anyone has to find them; details in [§15](#15-honest-limitations)
 
 - The radar is emulated (truth plus white noise), and a constant velocity bias is invisible to the filter: drift grows as bias × time.
 - Today's estimator fuses the IMU twice (robot_localization feeds EKF3); the committed fix is one filter in EKF3.
-- Detection is tested on three rendered survivor images; in-flight confidence was 41–84 %. Partly buried people are untested.
+- Detection is tested on three rendered survivor images; in-flight confidence was 41–84 %. Partly buried people are untested. The one real-camera check (bench, 4 Oct) is a single person in a single room, and the box was present in about half the frames.
+- The fire and smoke detector is scored on a dataset of ground-level and surveillance images, not on views from a drone; it is not connected to the flight software. Water and damage classes do not exist.
 - Survivor reports sent during a link outage are lost, and repeated fixes overwrite each other.
 - Every flight so far is a 6 × 6 m box on clear ground with no obstacle avoidance.
 - No flight hardware is built. The Drone B wiring (rev A) and power-board concept are designs; the bench has a flight controller running Betaflight and a 5-inch test quad.
