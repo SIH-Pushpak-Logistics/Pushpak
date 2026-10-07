@@ -1,10 +1,10 @@
 # PUSHPAK · Project record
 
-What has been built, in what order, and why the main decisions were taken. Status as of 2 Oct 2026.
+What has been built, in what order, and why the main decisions were taken. Status as of 7 Oct 2026.
 
 ## Summary
 
-PUSHPAK is IIT Patna's entry to Smart India Hackathon 2026, problem statement SIH26177 (an AI-powered autonomous drone that aids search and rescue by detecting people and hazards; Robotics and Drones; Hardware category; team ID 169135). The idea-stage submission went in on 30 Sep 2026: a six-slide deck, an abstract, a demo video and links to this repository, the documentation folder and the bill of materials.
+PUSHPAK is an entry to Smart India Hackathon 2026, problem statement SIH26177 (an AI-powered autonomous drone that aids search and rescue by detecting people and hazards; Robotics and Drones; Hardware category; team ID 169135). The idea-stage submission went in on 30 Sep 2026: a six-slide deck, an abstract, a demo video and links to this repository, the documentation folder and the bill of materials. The deck, abstract and description were updated once, on 5 Oct, in the re-upload window.
 
 What exists: a full simulated search stack for the scout drone (Drone B) that flies without GPS, finds people with on-board AI, survives the loss of the command post, and lands itself if its own guidance process dies; a peer-to-peer telemetry link tested on two real laptops; a React command-post dashboard; and a rev-A wiring and power-board design for Drone B. What does not exist yet: any flown hardware, Drone A, hazard detection, rescue ordering and routing.
 
@@ -24,6 +24,9 @@ What exists: a full simulated search stack for the scout drone (Drone B) that fl
 | 29 Sep | **Telemetry node**: the vehicle's only Zenoh session, survivor dedup, heartbeats, peer liveness (#38). **Phase 5**: detection flight 1 (3/3), bare-ground run (0 false alarms), run R1 recorded for the video (3/3). Offline rotation sweep (Raunak). Tripwire T-6 fired: no ArduPilot desk rig |
 | 30 Sep | Perception node in the launch file with 12-rotation TTA (#40). Drone B wiring rev A and power-board review (Kanishk). **SIH idea submission at about 13:15 IST** |
 | 2 Oct | `main` moved to `arch/v2` (3329075); 91 automated tests pass; 12 vs 24 rotation sweep: both 288/288, 12 rotations at half the model time; development moves from the RTX 3050 laptop to an RTX 4070 laptop; this documentation set |
+| 4 Oct | First hazard result: a fire and smoke detector (YOLOv8n trained on D-Fire) scored offline (E20). First real-camera check: a person on the floor in dim light, on the bench (E21) (#43) |
+| 5 Oct | **SIH re-upload** in the one-time window (2–5 Oct): a revised six-slide deck, abstract and description; a reviewer FAQ added to the documentation folder |
+| 7 Oct | Repository brought in line with the re-uploaded deck: the re-upload recorded below, `docs/FAQ.md`, the commander-view mock-up, and the Qualcomm AI Hub profiling added to the roadmap |
 
 ## Decisions and why
 
@@ -61,7 +64,7 @@ Decided in advance and executed without debate when their deadline passed.
 
 Six slides on the official SIH template, exported as PDF:
 
-1. Title: PUSHPAK, plain-language subtitle, PS SIH26177, team 169135, IIT Patna.
+1. Title: PUSHPAK, plain-language subtitle, PS SIH26177, team 169135, institute.
 2. Proposed solution: the problem in plain words, what is new against tools responders use today, the four-step mission with status, the dashboard, and PS coverage (six features partial, two planned).
 3. Technical approach: Drone B data flow, stack, hardware for both drones and the command post, method (SITL done → bench started → HIL → field), eight bottleneck → solution rows.
 4. Feasibility: tiles (0.58 m, no wait, 1.05 s, 3/3), the drift-law chart, the fail-safe ladder, the Drone B wiring rev A, challenges and strategies, bench photos.
@@ -71,6 +74,19 @@ Six slides on the official SIH template, exported as PDF:
 Colour rule on every slide: blue means measured in simulation, orange means designed or planned.
 
 Also submitted on the portal: title and abstract, technology bucket Mechatronics, and the demo video.
+
+## What was re-uploaded (5 Oct)
+
+SIH opened a one-time window (2–5 Oct) to update a submitted idea. The deck, the abstract and the description were replaced; the title, the demo video and the technology bucket stayed the same. Six slides on the same template:
+
+1. Title: PUSHPAK, a one-sentence description, PS SIH26177, theme, category, team ID and name.
+2. Proposed solution: the three questions rescuers must answer, an illustration of the mission, a need / today / PUSHPAK table, the four-step mission, the live dashboard from run R1 with links to the demo video and `EVIDENCE.md`, and PS coverage (eight features).
+3. Technical approach: one workflow and architecture diagram for both drones and the command post (solid runs in simulation, dashed is planned); the stack with a one-line reason for each choice; the next step for on-drone AI (a one-pass INT8 detector with TensorRT, to be profiled on a Qualcomm QCS6490 through Qualcomm AI Hub); the method in four stages (simulation done, bench started, hardware-in-the-loop, field).
+4. Feasibility: tiles (3 / 3, 0.58 m, no server with 1.78 s, 1.05 s), the drift-law chart, fault injection, the bench check (E21), detector results (12 vs 24 rotations, D-Fire scores, E19 and E20), five risks with a strategy each.
+5. Impact: earthquakes first, floods and landslides next; a mock-up of the commander view, planned for the finale with the 3D map as a stretch goal; published survival figures by day of rescue (as quoted in Chiu et al., 2020), the 62 s search-pattern flight, and the aim of telling the commander where to go first inside the first 72 hours; who benefits; cost ₹3.87–4.50 lakh.
+6. Research and references: repository QR code and six links (repository, demo video, evidence table, documentation and FAQ folder, bill of materials, roadmap), roadmap phases 1–4 with dates, five references (Kramer 2020; Doer & Trommer 2020; Labbé & Michaud 2019; Koenig & Likhachev 2002; Chiu et al. 2020) and the hazard datasets (D-Fire used; FLAME, FloodNet, RescueNet as candidates).
+
+Same colour rule: blue means tested in simulation, orange means planned. Results that are neither (the two-laptop link test, the offline detector scores, the bench check) are labelled in words.
 
 ## Machines
 
@@ -110,4 +126,7 @@ Also submitted on the portal: title and abstract, technology bucket Mechatronics
 | 38 | Telemetry node: keyframes, survivors with dedup, heartbeat, peer liveness |
 | 39 | Offline drift animation and TTA sweep tools; drift card reports absolute error; 12 vs 24 rotation sweep |
 | 40 | Launch perception_node (12-rotation TTA, visual velocity off); parameter-type note |
+| 41 | README for the submitted design; documentation set and figures |
+| 42 | README: launch the stack once; restart the gateway per flight |
+| 43 | Offline fire and smoke detector on D-Fire (E20); bench camera check (E21) |
 

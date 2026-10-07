@@ -29,6 +29,8 @@ The submitted design covers the whole mission: survey, search, prioritise and ro
 | Survivors | Drone B | Merged pins with an error circle, confidence, photo, condition flags |
 | Route | Command post | Suggested path and its cost; commander's decision |
 
+**3D map (stretch goal).** A 3D point-cloud map of the searched structure, built with RTAB-Map (Labbé & Michaud, 2019) from the scout's depth camera, so the commander can see where a pin sits inside the structure. It depends on the depth camera working in a dark, dusty void and on the on-board compute budget; neither is tested. The 2D layers above do not depend on it.
+
 **Bandwidth rule.** Heavy data stays on the drone; only small messages cross the link first. A survivor alert is ≤ 48 bytes; photos and map tiles follow when the link allows.
 
 Today: survivor pins in metres from the command-post origin, drawn live on the dashboard (Built, sim). Everything else: Planned.
@@ -110,6 +112,10 @@ The weights are deliberately not fixed in code yet: they should be set with resp
 
 Built (sim): live map with pins, telemetry, link status, the live drone ID; a null-safe link panel that shows "not measured" instead of an invented signal strength. Planned: photo feed, hazard markers, error circles, rescue-order list with reasons, route overlay, alert acknowledgements, mission status.
 
+**Commander view (planned for the finale).** One screen that puts the planned pieces together: the map with numbered survivor pins and hatched hazard zones, the survivor list in the recommended order with the reason for each place, the suggested route with Confirm and Change, and the list of flagged hazards. The system never marks a route safe; the commander decides. The picture below is a mock-up with invented data (`docs/mockups/commander_view.html`), as shown in the 5 Oct deck. The 3D map in it is the stretch goal of §1; the same view works on the 2D map.
+
+![Commander view mock-up](figures/ui_01_commander_view_mockup.png)
+
 ## 8. Field operations
 
 - **Setup:** UWB anchors at the entrance, two surveyed with GNSS; command-post laptop and its own Wi-Fi access point (phone hotspots and campus networks block device-to-device traffic, measured 26 Sep).
@@ -130,3 +136,8 @@ Built (sim): live map with pins, telemetry, link status, the live drone ID; a nu
 | 5 | Walkability layer and wall/wire detection | Routes beyond flagged hazards |
 | 6 | Real survivor recall on aerial images, partly buried people | Credible detection claims |
 | 7 | Weather limits: rain, dust, monsoon wind at 50 m | Field operation |
+
+## References
+
+- Koenig, S. & Likhachev, M. (2002). D* Lite. AAAI.
+- Labbé, M. & Michaud, F. (2019). RTAB-Map as an Open-Source Lidar and Visual SLAM Library for Large-Scale and Long-Term Online Operation. Journal of Field Robotics 36(2).

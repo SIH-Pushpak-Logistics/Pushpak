@@ -2,14 +2,14 @@
 
 Better slides cannot raise PUSHPAK's technical credibility; only measurements can. Each item below replaces an estimate with a number, or a design with something that runs.
 
-## The four phases (as submitted)
+## The four phases (as re-uploaded on 5 Oct)
 
 | Phase | Content | Status |
 |---|---|---|
 | **1 · Done in simulation** | GPS-denied flight on IMU + radar + ToF; search pattern, 10/10 waypoints; people detection at any angle; peer-to-peer link (also on two real laptops) + live dashboard; fail-safes FS-2, FS-4, FS-5; bench started with a flight controller and a laptop camera | Done (radar emulated) |
-| **2 · Next, in simulation** | One filter (radar + rangefinder into EKF3, optical-flow fallback); hazards from thermal hotspots + fire/smoke; reports stored and re-sent after link loss; repeated fixes merged into one pin with an error circle; rescue order + suggested route; training on rotated images | Not started |
-| **3 · Build hardware** | Full Drone B bench rig → hardware-in-the-loop; Orin Nano TensorRT timing + heat pipes; ducted frame + prop guards, OAK-D avoidance; measured endurance and ArduPilot fail-safes; Drone A with GNSS + thermal + NPU; power board rev B → PCB | Design rev A done (wiring, power-board concept) |
-| **4 · Field and scale** | Trials at NDRF / SDRF training sites; Drone Rules 2021 registration and certified pilot; lat/long pins + photo confirmation; relay nodes dropped at void entrances; extension to floods and landslides; research on radar-inertial odometry | Not started |
+| **2 · Next, in simulation** (Oct–Nov 2026) | One filter (radar + rangefinder into EKF3, optical-flow fallback); hazards: fire and smoke first, then water, damage and thermal hotspots; obstacle avoidance in a rubble world; reports stored and re-sent after link loss; repeated fixes merged into one pin with an error circle; rescue order + suggested route; Drone A in simulation; training on rotated images. Stretch goals: a 3D map (RTAB-Map) and a flood scenario | Started: fire and smoke detector scored offline (E20) |
+| **3 · Build hardware** (bench now; build once funded) | Full Drone B bench rig → hardware-in-the-loop; a real radar on the bench; one-pass INT8 detector on the drone's computer: Orin Nano TensorRT timing + heat pipes, and the same model profiled on a Qualcomm QCS6490; ducted frame + prop guards, OAK-D avoidance; measured endurance and ArduPilot fail-safes; Drone A with GNSS + thermal + NPU; power board rev B → PCB | Design rev A done (wiring, power-board concept); first bench check with a real camera (E21) |
+| **4 · Field and scale** (after the hardware flies) | Trials at NDRF / SDRF training sites; Drone Rules 2021 registration and certified pilot; lat/long pins + photo confirmation; relay nodes dropped at void entrances; extension to floods and landslides; research on radar-inertial odometry | Not started |
 
 ## Next measurements, in priority order
 
@@ -24,6 +24,7 @@ Better slides cannot raise PUSHPAK's technical credibility; only measurements ca
 | 7 | Jetson input power with all peripherals, to choose 12 V vs 19 V | Kanishk | the open power budget |
 | 8 | Real IWR6843 on the bench with a Doppler ego-velocity estimator; bias at rest and in motion | Ashutosh / Kanishk | the emulated radar (largest credibility gain) |
 | 9 | Detection on real or aerial search-and-rescue images, including partly covered people | Raunak | three rendered decals |
+| 10 | YOLOv8n INT8 profiled on a hosted Qualcomm QCS6490 device through Qualcomm AI Hub: time per frame and memory | Raunak | "no result on the sponsor's edge-AI hardware" (open risk 15) |
 
 ## Engineering backlog (simulation)
 
@@ -38,6 +39,7 @@ Better slides cannot raise PUSHPAK's technical credibility; only measurements ca
 | `collapse.sdf` rubble world; obstacle avoidance from OAK-D depth | Every flight so far is a 6 × 6 m box on clear ground |
 | Drone A in simulation; a two-drone relay run | The two-tier claim is unproven; three live peers is the most tested |
 | UWB reset in simulation | Bounded drift needs absolute resets |
+| Commander view on the dashboard: rescue-order list with reasons, hazard zones, suggested route with confirm / change | Shown as a mock-up in the 5 Oct deck (`docs/MISSION_DESIGN.md` §7); the 3D map in it is a stretch goal |
 | Commit the bench script and the track evaluator to `tools/` | Evidence tooling must live in the repo |
 
 ## Open risks
@@ -58,7 +60,7 @@ Better slides cannot raise PUSHPAK's technical credibility; only measurements ca
 | 12 | Nothing fabricated in a hardware-category entry | A jury will ask to see it fly | Bench → HIL → first flight of the test quad |
 | 13 | Drone Rules 2021 permissions | Needed before any field trial | Register early |
 | 14 | Team split between cities | No joint live demo | Remote demos, shared rig schedule |
-| 15 | Compute platform lock-in | The PS sponsor may expect other edge-AI hardware | The stack is ROS 2 plus a standard exported model; a porting study to other edge-AI boards is on the list once availability in India is checked |
+| 15 | Compute platform lock-in | The PS sponsor may expect other edge-AI hardware | The stack is ROS 2 plus a standard exported model. Measurement 10 is the first step; a porting study to other edge-AI boards follows once availability in India is checked |
 
 ## Hardware sequence
 

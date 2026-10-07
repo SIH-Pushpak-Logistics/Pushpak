@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PUSHPAK commander view (mock-up, fake data)</title>
+<style>
+  /* Mock-up of a planned screen. Every value on it is invented. */
+  :root {
+    --teal: #1F3C3C;      /* top strip, selected row */
+    --ground: #1B1B1E;    /* map background */
+    --maroon: #591C24;    /* hazard fill */
+    --red: #9E0C20;       /* hazard edge, priority 1 */
+    --slate: #354145;     /* rules, controls */
+    --panel: #212528;
+    --paper: #E9E4D8;     /* text */
+    --quiet: #A3ADAB;     /* secondary text */
+    --amber: #E2B13C;     /* other survivors, planned tag */
+    --red-lift: #B8162B;  /* red, lifted so it holds on the dark ground */
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--ground); }
+  body {
+    width: 840px; height: 525px; overflow: hidden;
+    font-family: Calibri, Carlito, "Segoe UI", sans-serif;
+    font-size: 14px; line-height: 1.25; color: var(--paper);
+    font-variant-numeric: tabular-nums;
+  }
+  .strip {
+    height: 34px; background: var(--teal); display: flex; align-items: center; gap: 18px; padding: 0 12px;
+    border-bottom: 1px solid #0f2222;
+  }
+  .strip .name { font-size: 16px; font-weight: 700; letter-spacing: .02em; }
+  .strip .name span { font-weight: 400; margin-left: 7px; }
+  .strip .site { color: #C4CFCC; }
+  .strip .right { margin-left: auto; display: flex; align-items: center; gap: 16px; color: #C4CFCC; }
+  .strip .right b { color: var(--paper); font-weight: 700; }
+  .tag { border: 1px solid var(--amber); color: var(--amber); padding: 1px 8px 2px; border-radius: 2px; font-weight: 700; }
+  .main { display: flex; height: 491px; }
+  .map { position: relative; width: 554px; height: 491px; background: var(--ground); }
+  .map canvas { position: absolute; inset: 0; width: 554px; height: 491px; }
+  .view { position: absolute; left: 12px; top: 11px; display: flex; border: 1px solid var(--slate); border-radius: 3px; overflow: hidden; }
+  .view span { padding: 2px 11px 3px; color: var(--quiet); }
+  .view span.on { background: var(--slate); color: var(--paper); font-weight: 700; }
+  .caption { position: absolute; left: 12px; bottom: 9px; color: var(--quiet); font-size: 12.5px; }
+  .caption b { color: var(--paper); font-weight: 400; }
+  .side { width: 286px; height: 491px; background: var(--panel); border-left: 1px solid var(--slate); display: flex; flex-direction: column; }
+  .head { display: flex; justify-content: space-between; align-items: baseline; padding: 9px 12px 6px; color: var(--quiet); font-size: 13px; }
+  .head strong { color: var(--paper); font-size: 15px; }
+  .row { display: grid; grid-template-columns: 30px 1fr auto; column-gap: 8px; padding: 6px 12px 7px 9px; border-top: 1px solid var(--slate); border-left: 3px solid transparent; }
+  .row.first { background: var(--teal); border-left-color: var(--red-lift); }
+  .pin { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 14px; margin-top: 1px; }
+  .pin.p1 { background: var(--red-lift); color: #fff; box-shadow: 0 0 0 2px var(--paper); }
+  .pin.p2 { background: var(--amber); color: var(--ground); }
+  .row h3 { margin: 0; font-size: 15px; font-weight: 700; }
+  .row p { margin: 1px 0 0; color: var(--quiet); font-size: 12.5px; }
+  .row.first p { color: #C4CFCC; }
+  .conf { text-align: right; font-size: 15px; font-weight: 700; }
+  .conf small { display: block; font-weight: 400; font-size: 11.5px; color: var(--quiet); }
+  .row.first .conf small { color: #C4CFCC; }
+  .block { border-top: 1px solid var(--slate); padding: 9px 12px 10px; }
+  .block h4 { margin: 0 0 3px; font-size: 13px; font-weight: 400; color: var(--quiet); }
+  .block .lead { font-size: 15px; font-weight: 700; margin: 0; }
+  .block .sub { margin: 2px 0 8px; color: var(--quiet); font-size: 12.5px; }
+  .buttons { display: flex; gap: 8px; }
+  .btn { flex: 1; text-align: center; padding: 5px 0 6px; border-radius: 3px; font-weight: 700; font-size: 14px; }
+  .btn.go { background: var(--paper); color: var(--ground); }
+  .btn.alt { border: 1px solid #6B7A7F; color: var(--paper); }
+  .haz { list-style: none; margin: 4px 0 0; padding: 0; font-size: 13px; }
+  .haz li { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+  .haz i { width: 14px; height: 10px; flex: none; border: 1px solid var(--red-lift);
+           background: repeating-linear-gradient(135deg, var(--maroon) 0 3px, #7A1522 3px 5px); }
+  .haz em { font-style: normal; color: var(--quiet); margin-left: auto; font-size: 12.5px; }
+  .foot { margin-top: auto; padding: 8px 12px 9px; border-top: 1px solid var(--slate); color: var(--quiet); font-size: 12.5px; }
+  .foot b { color: var(--paper); }
+</style>
+</head>
+<body>
+  <div class="strip">
+    <div class="name">PUSHPAK<span>Commander view</span></div>
+    <div class="site">Site 2, collapsed three-storey block</div>
+    <div class="right">
+      <span><b>3</b> peers linked</span>
+      <span>Scout battery <b>58%</b></span>
+      <span class="tag">Mock-up, planned view</span>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="map">
+      <canvas id="c" width="1662" height="1473"></canvas>
+      <div class="view"><span class="on">3D</span><span>Plan</span></div>
+      <div class="caption"><b>3D map (RTAB-Map)</b>, 41,208 points, updated 14:32:07. Grid squares are 5 m.</div>
+    </div>
+
+    <div class="side">
+      <div class="head"><strong>Survivors, 3 found</strong><span>confidence</span></div>
+
+      <div class="row first">
+        <div class="pin p1">1</div>
+        <div><h3>Near flagged fire</h3><p>Photo and thermal agree</p><p>17 m from entrance, seen 48 s ago</p></div>
+        <div class="conf">86%</div>
+      </div>
+      <div class="row">
+        <div class="pin p2">2</div>
+        <div><h3>Weak heat signature</h3><p>Thermal only, no movement seen</p><p>15 m from entrance, seen 2 min ago</p></div>
+        <div class="conf">62%</div>
+      </div>
+      <div class="row">
+        <div class="pin p2">3</div>
+        <div><h3>No flags</h3><p>Photo, lying in the open</p><p>20 m from entrance, seen 3 min ago</p></div>
+        <div class="conf">91%</div>
+      </div>
+
+      <div class="block">
+        <h4>Suggested path to survivor 1</h4>
+        <p class="lead">20 m, two turns</p>
+        <p class="sub">Clear of the wire, ends 3 m from the fire.</p>
+        <div class="buttons"><div class="btn go">Confirm path</div><div class="btn alt">Change</div></div>
+      </div>
+
+      <div class="block">
+        <h4>Hazards flagged</h4>
+        <ul class="haz">
+          <li><i></i>Fire<em>survey drone, thermal</em></li>
+          <li><i></i>Standing water<em>survey drone</em></li>
+          <li><i></i>Downed wire<em>marked by you</em></li>
+        </ul>
+      </div>
+
+      <div class="foot"><b>You decide.</b> PUSHPAK never marks a path safe.</div>
+    </div>
+  </div>
+
+<script>
+// ---- fake 3D map: a point cloud of a lean-to collapse, drawn on a canvas -------------------------------
+const cv = document.getElementById('c'), g = cv.getContext('2d');
+const K = 3; g.scale(K, K);                       // canvas is 3x for a sharp screenshot
+const W = 554, H = 491;
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const R = rng(20261005);
+const gauss = () => { let s = 0; for (let i = 0; i < 4; i++) s += R(); return (s - 2) * 1.2; };
+
+const TH = 20 * Math.PI / 180, EL = 40 * Math.PI / 180, S = 15, OX = 14, OY = 308;
+function P(x, y, z) {
+  const xr = x * Math.cos(TH) + y * Math.sin(TH), d = -x * Math.sin(TH) + y * Math.cos(TH);
+  return [OX + xr * S, OY - d * Math.sin(EL) * S - z * Math.cos(EL) * S, d];
+}
+const PAPER = '#E9E4D8', QUIET = '#A3ADAB', AMBER = '#E2B13C', REDL = '#B8162B', MAROON = '#591C24', SLATE = '#354145', GROUND = '#1B1B1E';
+
+function path(pts, close) { g.beginPath(); pts.forEach((p, i) => { const q = P(p[0], p[1], p[2] || 0); i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]); }); if (close) g.closePath(); }
+
+// ground grid, 5 m squares
+g.lineWidth = 0.6; g.strokeStyle = '#2A3336';
+for (let x = 0; x <= 30; x += 5) { path([[x, 0], [x, 20]]); g.stroke(); }
+for (let y = 0; y <= 20; y += 5) { path([[0, y], [30, y]]); g.stroke(); }
+
+// ground returns: sparse, uneven
+for (let i = 0; i < 2600; i++) {
+  const x = R() * 30, y = R() * 20; if (R() < 0.35 && y < 6 && x > 12) continue;
+  const q = P(x, y, R() * 0.12); g.fillStyle = 'rgba(58,92,92,' + (0.35 + R() * 0.35) + ')'; g.fillRect(q[0], q[1], 1.2, 1.2);
+}
+
+// hazards: hatched zones on the ground
+function zone(pts, label, lx, ly) {
+  g.save(); path(pts, true); g.fillStyle = 'rgba(89,28,36,0.78)'; g.fill(); g.clip();
+  g.strokeStyle = 'rgba(184,22,43,0.75)'; g.lineWidth = 1;
+  for (let k = -200; k < 800; k += 6) { g.beginPath(); g.moveTo(k, 0); g.lineTo(k + 300, 500); g.stroke(); }
+  g.restore(); path(pts, true); g.strokeStyle = REDL; g.lineWidth = 1.2; g.stroke();
+  zones.push([label, lx, ly]);
+}
+const zones = [];
+const circle = (cx, cy, r) => Array.from({ length: 30 }, (_, i) => [cx + r * Math.cos(i / 30 * 6.283), cy + r * Math.sin(i / 30 * 6.283)]);
+zone(circle(22.2, 7.2, 2.3), 'Fire', 24.9, 6.6);
+zone([[25.5, 0.8], [29.6, 1.2], [29.8, 4.6], [27.0, 5.4], [24.8, 3.2]], 'Standing water', 25.6, -1.3);
+zone([[5.3, 5.1], [12.6, 3.5], [12.4, 2.5], [5.1, 4.1]], 'Downed wire', 8.2, 0.4);
+
+// scout track (where it has flown) and the suggested path
+g.setLineDash([]); g.lineWidth = 1; g.strokeStyle = 'rgba(143,179,174,0.75)';
+g.setLineDash([2, 3]); path([[15.2, 8.6, 1.0], [16.4, 10.8, 1.2], [12.6, 11.4, 1.2]]); g.stroke(); g.setLineDash([]);
+g.setLineDash([7, 4]); g.lineWidth = 2.2; g.strokeStyle = PAPER;
+path([[2, 1], [2.4, 5.2], [6.5, 6.3], [14.0, 6.2], [17.5, 8.6]]); g.stroke(); g.setLineDash([]);
+
+// footprint of the block, so the cloud has something to sit on
+g.lineWidth = 0.9; g.strokeStyle = '#3F4D52'; path([[4, 7], [26, 7], [26, 19], [4, 19]], true); g.stroke();
+
+// structure: walls, a leaning floor slab, rubble
+const pts = [];
+const add = (x, y, z) => pts.push(P(x, y, z).concat(z));
+for (let i = 0; i < 2400; i++) {                                  // back wall, part fallen in, with window openings
+  const x = 4 + R() * 22, top = x < 12 ? 6 : x < 18 ? 3.4 + 0.5 * Math.sin(x * 2.1) : 5.1, z = R() * top;
+  if ((x % 3.2) > 1.1 && (x % 3.2) < 2.1 && (z % 2.6) > 1.0 && (z % 2.6) < 2.0) continue;
+  add(x + gauss() * 0.04, 19 + gauss() * 0.05, z);
+}
+for (let i = 0; i < 950; i++) { const y = 7 + R() * 12; add(4 + gauss() * 0.05, y, R() * (5.2 - 0.17 * (19 - y))); }      // left wall
+for (let i = 0; i < 3300; i++) {                                  // the floor slab that came down
+  const x = 8 + R() * 14, v = R(); if (Math.abs(x - (13.5 + 1.5 * v)) < 0.13 || Math.abs(x - (18.6 - 0.8 * v)) < 0.09) continue;
+  if ((x < 8.5 || x > 21.5 || v > 0.96) && R() < 0.6) continue;
+  add(x, 7 + 9 * v, 0.6 + 4.9 * v + gauss() * 0.05);
+}
+for (let i = 0; i < 520; i++) { const t = R(), k = Math.floor(R() * 4);                                  // slab edges, a little denser
+  const x = k === 0 ? 8 : k === 1 ? 22 : 8 + 14 * t, v = k < 2 ? t : k === 2 ? 0 : 1; add(x + gauss() * 0.05, 7 + 9 * v, 0.6 + 4.9 * v + gauss() * 0.05); }
+for (let i = 0; i < 700; i++) { const x = 15.5 + R() * 6.5, v = R(); add(x, 12.5 + 4.5 * v, 3.6 + 2.6 * v + gauss() * 0.05); } // broken upper piece
+[[6.5, 10.5, 1.3, 1.1], [24.6, 10.6, 1.5, 1.4], [20.2, 4.3, 1.0, 0.8], [27.6, 8.4, 1.2, 1.0], [10.2, 8.0, 0.9, 0.7]].forEach(([cx, cy, r, h]) => {
+  for (let i = 0; i < 380; i++) { const dx = gauss() * r, dy = gauss() * r, dist = Math.hypot(dx, dy); add(cx + dx, cy + dy, Math.max(0, h * (1 - dist / (1.9 * r))) * (0.5 + R() * 0.5)); }
+});
+for (let i = 0; i < 420; i++) add(26 + R() * 3.5, 14 + gauss() * 0.05, R() * 4);                                            // stub of the next building
+for (let i = 0; i < 380; i++) add(26 + gauss() * 0.05, 9.5 + R() * 4.5, R() * (2.2 + R() * 1.6));
+pts.sort((a, b) => b[2] - a[2]);                                  // far to near
+const ramp = z => { const t = Math.min(1, z / 6), a = [44, 88, 88], b = [120, 158, 148], c = [233, 226, 198];
+  const m = t < 0.45 ? a.map((v, i) => v + (b[i] - v) * t / 0.45) : b.map((v, i) => v + (c[i] - v) * (t - 0.45) / 0.55); return 'rgb(' + m.map(Math.round).join(',') + ')'; };
+pts.forEach(p => { g.fillStyle = ramp(p[3]); g.globalAlpha = 0.9; g.fillRect(p[0], p[1], 1.5, 1.5); }); g.globalAlpha = 1;
+
+// labels
+g.textBaseline = 'middle'; g.font = '12.5px Calibri, Carlito, sans-serif';
+function chip(text, sx, sy, col) { const w = g.measureText(text).width + 10; g.fillStyle = 'rgba(27,27,30,0.86)'; g.fillRect(sx, sy - 9, w, 18);
+  g.fillStyle = col || PAPER; g.fillText(text, sx + 5, sy + 0.5); }
+zones.forEach(([t, x, y]) => { const q = P(x, y, 0); chip(t, q[0], q[1]); });
+let e = P(2, 1, 0); g.fillStyle = PAPER; g.fillRect(e[0] - 4, e[1] - 4, 8, 8); chip('Entrance', e[0] - 14, e[1] + 17);
+let sc = P(12.6, 11.4, 1.2); g.strokeStyle = PAPER; g.lineWidth = 1.6;
+g.beginPath(); g.moveTo(sc[0] - 6, sc[1] - 3); g.lineTo(sc[0] + 6, sc[1] + 3); g.moveTo(sc[0] - 6, sc[1] + 3); g.lineTo(sc[0] + 6, sc[1] - 3); g.stroke();
+chip('Scout', sc[0] - 46, sc[1] - 1, QUIET);
+
+// survivor pins: a stem down to the floor, a numbered head
+function pin(x, y, n, first) {
+  const a = P(x, y, 0), b = P(x, y, 3.1); g.strokeStyle = first ? PAPER : AMBER; g.lineWidth = 1.4; g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+  g.beginPath(); g.ellipse(a[0], a[1], 4.5, 2.4, 0, 0, 6.3); g.fillStyle = first ? PAPER : AMBER; g.fill();
+  if (first) { g.beginPath(); g.arc(b[0], b[1], 15, 0, 6.3); g.strokeStyle = PAPER; g.lineWidth = 1; g.stroke(); }
+  g.beginPath(); g.arc(b[0], b[1], 10.5, 0, 6.3); g.fillStyle = first ? REDL : AMBER; g.fill(); g.lineWidth = 2; g.strokeStyle = first ? PAPER : GROUND; g.stroke();
+  g.fillStyle = first ? '#fff' : GROUND; g.font = 'bold 14px Calibri, Carlito, sans-serif'; g.textAlign = 'center'; g.fillText(n, b[0], b[1] + 0.5); g.textAlign = 'left';
+}
+pin(11.0, 13.2, 2, false); pin(21.5, 1.6, 3, false); pin(17.5, 8.6, 1, true);
+
+// north arrow
+const n0 = [W - 36, 44], dir = [Math.sin(TH), -Math.cos(TH) * Math.sin(EL)], len = Math.hypot(dir[0], dir[1]), u = [dir[0] / len, dir[1] / len];
+g.strokeStyle = QUIET; g.fillStyle = QUIET; g.lineWidth = 1.4; g.beginPath(); g.moveTo(n0[0] - u[0] * 12, n0[1] - u[1] * 12); g.lineTo(n0[0] + u[0] * 12, n0[1] + u[1] * 12); g.stroke();
+g.beginPath(); g.moveTo(n0[0] + u[0] * 17, n0[1] + u[1] * 17); g.lineTo(n0[0] + u[0] * 9 - u[1] * 4.5, n0[1] + u[1] * 9 + u[0] * 4.5); g.lineTo(n0[0] + u[0] * 9 + u[1] * 4.5, n0[1] + u[1] * 9 - u[0] * 4.5); g.fill();
+g.font = '12.5px Calibri, Carlito, sans-serif'; g.fillText('N', n0[0] + u[0] * 24 - 4, n0[1] + u[1] * 24);
+</script>
+</body>
+</html>
