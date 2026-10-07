@@ -3,7 +3,7 @@
 **Two drones that find people trapped after a building collapse and show rescuers where they are and a way in around known hazards, even with no GPS, phone network or internet.**
 A high drone maps the site and its hazards; a small scout drone searches close to the rubble. The system recommends; the commander decides.
 
-Smart India Hackathon 2026 · Problem statement **SIH26177** (Robotics and Drones, Hardware) · Team **PUSHPAK** (ID 169135) · IIT Patna
+Smart India Hackathon 2026 · Problem statement **SIH26177** (Robotics and Drones, Hardware) · Team **PUSHPAK** (ID 169135)
 
 > **Honesty rule for everything in this repository:** simulation results are measured; hardware is designed and priced, not yet built. Every capability below is tagged **Tested in sim**, **Partial** or **Planned**, and every number links to the run that produced it.
 
@@ -40,13 +40,13 @@ Mapped against the eight expected features of PS SIH26177. None is complete; the
 | PS expected feature | Exists today (simulation) | Designed (planned) | Status |
 |---|---|---|---|
 | Autonomous navigation, GPS-enabled and GPS-denied | Drone B flies a search pattern with no GPS or compass: IMU + radar velocity + ToF height into an EKF; radar emulated | Drone A on GNSS with a non-GPS fallback; Drone B handed over at the entrance; OAK-D depth avoidance; ducted frame | Partial |
-| On-device AI inference | YOLOv8n people detection on board with 12 rotations; 77 ms per frame on an RTX 3050 laptop GPU | TensorRT on the Orin Nano (not yet timed); hazard classes on Drone A's Hailo-8L NPU | Partial |
+| On-device AI inference | YOLOv8n people detection on board with 12 rotations; 77 ms per frame on an RTX 3050 laptop GPU | One-pass INT8 detector with TensorRT on the Orin Nano (not yet timed); the same model profiled on a Qualcomm QCS6490 through Qualcomm AI Hub (not yet run); hazard classes on Drone A's Hailo-8L NPU | Partial |
 | Multi-sensor fusion (RGB, thermal, IMU, GPS) | IMU + radar + ToF fused; RGB detection | Lepton thermal in the pipeline; GNSS on Drone A | Partial |
 | Hazard classification | Fire and smoke detector (YOLOv8n trained on D-Fire), scored offline on the dataset's test split: mAP50 0.81 smoke, 0.70 fire. Not on a drone and not in simulation | Thermal hotspots; water class; the detector on Drone A's NPU; visible damage flagged for an engineer, never judged stable | Partial |
-| Geo-tagged mapping: survivors, hazard zones, access routes | 2D survivor pins in metres from the command post | Lat/long via two GPS-surveyed UWB anchors; hazard zones; suggested route around flagged hazards | Partial |
+| Geo-tagged mapping: survivors, hazard zones, access routes | 2D survivor pins in metres from the command post | Lat/long via two GPS-surveyed UWB anchors; hazard zones; suggested route around flagged hazards; a 3D map of the searched structure as a stretch goal | Partial |
 | Emergency alerting, prioritised recommendations | Survivor alerts appear on the dashboard | Recommended rescue order; commander confirms | Planned |
 | Offline resilience | Zenoh peer mode, no broker; the search continued after the command post was killed | Reports stored on the drone and re-sent after a link outage (today they are lost) | Partial |
-| Command-centre dashboard | React dashboard: live pins, telemetry, link status | Photo feed, hazard markers, mission status | Partial |
+| Command-centre dashboard | React dashboard: live pins, telemetry, link status | Commander view: rescue-order list with reasons, suggested route, hazard zones ([mock-up](docs/figures/ui_01_commander_view_mockup.png)); photo feed, mission status | Partial |
 
 ## Planned capabilities
 
@@ -58,6 +58,7 @@ These were promised in the submission and are designed, not built. Each has a de
 - **Rescue order and route generation.** The command post ranks survivors by nearby danger, condition, reachability and confidence, and plans a route with A* / D* Lite on a cost grid where flagged fire, water, damage and downed wires are no-go zones. The commander confirms every recommendation.
 - **Drone A navigation.** GNSS when the fix is healthy; ArduPilot EKF3 source switching to camera flow / visual odometry + LiDAR height + UWB when it is not. The non-GPS sensor chain for Drone A is an open design item.
 - **Thermal sensing on Drone B.** FLIR Lepton 3.5 added to the detection pipeline; the RGB-thermal alignment and fusion rule are not designed yet.
+- **Commander view.** One dashboard screen with the survivors in the recommended rescue order, the flagged hazards and the suggested route; the commander confirms or changes it. The 5 Oct deck shows it as a mock-up with invented data ([docs/MISSION_DESIGN.md](docs/MISSION_DESIGN.md) §7). A 3D map of the structure (RTAB-Map on the scout's depth camera) is a stretch goal.
 - **Single estimator.** Radar velocity and rangefinder fused directly in ArduPilot EKF3 with an optical-flow fallback, replacing today's two filters in series ([docs/GPS_INDEPENDENCE.md](docs/GPS_INDEPENDENCE.md)).
 
 ## Measured results
@@ -157,6 +158,7 @@ cargo test --locked --manifest-path src/pushpak_peer/Cargo.toml
 | [docs/HARDWARE_AND_THERMAL.md](docs/HARDWARE_AND_THERMAL.md) | Drone A, Drone B and command-post hardware, wiring rev A, power budget, thermal management, cost |
 | [docs/MISSION_DESIGN.md](docs/MISSION_DESIGN.md) | Planned capabilities: hazard detection, mapping, survivor alerting, rescue order and routing |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Phases 1–4, next measurements, open risks |
+| [docs/FAQ.md](docs/FAQ.md) | Hard questions reviewers have asked, answered from this repository |
 | [docs/ZENOH_TWO_LAPTOP_TEST.md](docs/ZENOH_TWO_LAPTOP_TEST.md), [docs/RUST_PYTHON_HEARTBEAT_CHECK.md](docs/RUST_PYTHON_HEARTBEAT_CHECK.md) | Telemetry acceptance tests |
 
 ## Team

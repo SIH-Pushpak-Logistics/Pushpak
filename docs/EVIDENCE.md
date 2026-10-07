@@ -104,6 +104,7 @@ yolo detect val model=runs/hazard/dfire_y8n/weights/best.pt data=tools/hazard_df
 
 ## How not to read these numbers
 
+- **62.3 s is a navigation flight, not a search time.** The 6 × 6 m pattern (36 m²) was flown in 62.3 s, about 35 m² a minute, at a commanded speed of 0.70 m/s or less with 1.5 m lanes (E1). Detection was not running in that flight; the detection flights are E12 and E14. No comparison with the time a rescue team takes has been made.
 - **0.58 m is an emulator result.** The radar in simulation is truth plus white noise. A real radar adds bias, scale-factor and mounting errors; with a constant bias b the error grows as b × t (E4, E5). See `docs/GPS_INDEPENDENCE.md`.
 - **35, 71 and 77 ms are laptop-GPU numbers, not the drone computer.** The Orin Nano has not been timed. 35 vs 71 ms is the controlled comparison (model call only, offline); 77 ms is the full in-flight frame with the simulator running. An earlier 24-rotation reading (561 ms) came from a different session and is not comparable.
 - **288/288 comes from three clean rendered images**, at both 12 and 24 rotations. Three images are not a recall measurement; partly buried, dusty people are untested.
@@ -112,6 +113,16 @@ yolo detect val model=runs/hazard/dfire_y8n/weights/best.pt data=tools/hazard_df
 - **0.81 and 0.70 are dataset scores, not flight results.** D-Fire images are ground-level and surveillance views, not a drone looking down from 30–50 m. The model is not in `perception_node`, has not run in simulation and has not been timed on a drone computer. There are no water or damage classes.
 - **The bench check is one person, one room, 21 s.** It shows the detector working on a real camera with intermittent boxes; it is not a recall measurement. The clip does not record the rotation setting or the compute device, and nothing was flying.
 - **The cost (₹3.87–4.50 lakh) is a prototype parts estimate**, not a unit price, and predates the Drone A additions (`docs/HARDWARE_AND_THERMAL.md`).
+
+## Figures quoted from published work
+
+These appear in the deck and are not PUSHPAK results.
+
+| Figure | Source | Where we use it |
+|---|---|---|
+| Survival of trapped people by day of rescue after an earthquake: 74 % within 24 hours, 22 % on the third day, 6 % on the fifth | Quoted in Chiu, Y.-Y., Omura, H., Chen, H.-E. & Chen, S.-C. (2020), Indicators for Post-Disaster Search and Rescue Efficiency Developed Using Progressive Death Tolls, *Sustainability* 12(19), 8262, who cite Comfort (1995) and Gao (2006) | Slide 5 of the 5 Oct deck, to show why the first 72 hours matter |
+
+PUSHPAK claims no time saving. "The first 72 hours" on that slide is an aim, not a result.
 
 ## Pending measurements
 
@@ -122,3 +133,4 @@ yolo detect val model=runs/hazard/dfire_y8n/weights/best.pt data=tools/hazard_df
 | Hover endurance of the 5-inch test quad, then Drone B | the single-digit-minutes estimate |
 | A real IWR6843 on the bench with a Doppler ego-velocity estimator | the emulated radar |
 | Detection on real or aerial search-and-rescue images | three rendered decals |
+| YOLOv8n INT8 profiled on a hosted Qualcomm QCS6490 device through Qualcomm AI Hub | no result on the sponsor's edge-AI hardware |
